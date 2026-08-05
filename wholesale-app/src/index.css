@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 213 94% 45%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 213 94% 45%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 220 16% 12%;
+    --foreground: 220 10% 94%;
+    --card: 220 16% 16%;
+    --card-foreground: 220 10% 94%;
+    --popover: 220 16% 16%;
+    --popover-foreground: 220 10% 94%;
+    --primary: 213 90% 60%;
+    --primary-foreground: 220 16% 10%;
+    --secondary: 220 14% 22%;
+    --secondary-foreground: 220 10% 94%;
+    --muted: 220 14% 22%;
+    --muted-foreground: 220 10% 58%;
+    --accent: 220 14% 24%;
+    --accent-foreground: 220 10% 94%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 220 10% 98%;
+    --border: 220 14% 24%;
+    --input: 220 14% 22%;
+    --ring: 213 90% 60%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+  /* Remove number input spinner arrows globally */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+
+  /* Utility class for inputs rendered as text but wanting no spinner */
+  .no-spinner::-webkit-inner-spin-button,
+  .no-spinner::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .no-spinner {
+    -moz-appearance: textfield;
+  }
+}
+
+/* Print / PDF capture — hex colors only (html2canvas-safe) */
+.print-document {
+  background: #ffffff !important;
+  color: #111827 !important;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.print-document .pd-muted { color: #6b7280 !important; }
+.print-document .pd-primary { color: #2563eb !important; }
+.print-document .pd-heading { color: #374151 !important; }
+.print-document .pd-success { color: #16a34a !important; }
+.print-document .pd-danger { color: #dc2626 !important; }
+.print-document .pd-warn-bg { background: #fef9c3 !important; color: #854d0e !important; }
+.print-document .pd-success-bg { background: #dcfce7 !important; color: #15803d !important; }
+.print-document .pd-blue-bg { background: #eff6ff !important; }
+.print-document .pd-border { border-color: #2563eb !important; }
+.print-document .pd-border-light { border-color: #e5e7eb !important; }
+.print-document .pd-bold { font-weight: 700 !important; }
+.print-document .pd-semibold { font-weight: 600 !important; }
+.print-document .pd-mono { font-family: ui-monospace, monospace !important; }

@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return isSignedIn() && userDoc().data.role == 'admin';
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isFinanceOrAdmin() {
+      return isSignedIn() && userDoc().data.role in ['finance', 'admin'];
+    }
+
+    function isPurchasesPath() {
+      return request.path.size() >= 5 && request.path[4] == 'purchases';
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.role == 'staff';
+      allow update: if isAdmin()
+        || (isOwner(userId) && request.resource.data.role == resource.data.role);
+      allow delete: if false;
+    }
+
+    match /purchases/{purchaseId} {
+      allow read, write: if isFinanceOrAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if isSignedIn() && !isPurchasesPath();
+    }
+  }
+}
