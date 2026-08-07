@@ -1,5 +1,6 @@
 import type { Content, TDocumentDefinitions, TableCell } from 'pdfmake/interfaces'
 import { formatDate } from '@/lib/utils'
+import { getBillDateString, istDayStart } from '@/lib/istDate'
 import {
   PDF_TABLE_LAYOUT,
   basePdfDefinition,
@@ -59,7 +60,8 @@ function billItemsTable(bill: Bill): Content {
 }
 
 function billDate(bill: Bill): string {
-  if (bill.createdAt?.toDate) return formatDate(bill.createdAt.toDate())
+  const day = getBillDateString(bill)
+  if (day) return formatDate(istDayStart(day))
   return '—'
 }
 
@@ -160,15 +162,18 @@ export function buildBillPdfDefinition(
         { text: pdfFmt(bill.amountPaid), width: 80, alignment: 'right' as const },
       ],
       margin: [0, 0, 0, 4] as [number, number, number, number],
-    },
-    {
+    }
+  )
+
+  if (bill.remainingAmount > 0 && !bill.movedToLedger) {
+    totalsRows.push({
       columns: [
         { text: 'Balance Due', width: '*', alignment: 'right' as const, bold: true },
         { text: pdfFmt(bill.remainingAmount), width: 80, alignment: 'right' as const, bold: true },
       ],
       margin: [0, 4, 0, 0] as [number, number, number, number],
-    }
-  )
+    })
+  }
 
   const billToStack: Content[] = [
     { text: 'Bill To', style: 'sectionLabel' },

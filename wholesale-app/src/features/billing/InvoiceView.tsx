@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { getBillDateString, istDayStart } from '@/lib/istDate'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
 import type { Bill } from '@/types'
 
@@ -40,6 +41,8 @@ export default function InvoiceView({ bill }: InvoiceViewProps) {
     (sum, item) => sum + item.quantity * item.unitRate,
     0
   )
+  const billDay = getBillDateString(bill)
+  const invoiceDateLabel = billDay ? formatDate(istDayStart(billDay)) : '—'
 
   return (
     <div className="print-document p-6" id="invoice-print">
@@ -57,7 +60,7 @@ export default function InvoiceView({ bill }: InvoiceViewProps) {
           <h2 className="text-xl pd-bold pd-heading">TAX INVOICE</h2>
           <p className="pd-mono pd-primary pd-semibold mt-1">{bill.billNumber}</p>
           <p className="pd-muted text-xs mt-1">
-            Date: {bill.createdAt?.toDate ? formatDate(bill.createdAt.toDate()) : '—'}
+            Date: {invoiceDateLabel}
           </p>
           <span
             className={`inline-block mt-1 px-2 py-0.5 rounded text-xs pd-semibold ${
@@ -161,7 +164,7 @@ export default function InvoiceView({ bill }: InvoiceViewProps) {
             <span>Amount Paid</span>
             <span>{formatCurrency(bill.amountPaid)}</span>
           </div>
-          {bill.remainingAmount > 0 && (
+          {bill.remainingAmount > 0 && !bill.movedToLedger && (
             <div className="flex justify-between pd-semibold pd-danger border-t pt-1">
               <span>Balance Due</span>
               <span>{formatCurrency(bill.remainingAmount)}</span>

@@ -15,7 +15,7 @@ import {
 import { db } from '@/firebase/config'
 import { COLLECTIONS } from '@/firebase/collections'
 import { sanitizeFirestoreData } from '@/lib/firestoreUtils'
-import { previousMonthKey, toIstMonthKey } from '@/lib/istDate'
+import { getBillDateString, istDayStart, previousMonthKey, toIstMonthKey } from '@/lib/istDate'
 import { LEDGER_PAYMENT_REF } from './customerBalanceRepository.constants'
 import type { Bill, Customer, CustomerBalance, CustomerMonthlySnapshot, PurchaseInvoice, Transaction } from '@/types'
 
@@ -34,6 +34,12 @@ function toDate(ts: unknown): Date | undefined {
     return (ts as { toDate: () => Date }).toDate()
   }
   return undefined
+}
+
+function billActivityDate(bill: Bill): Date | undefined {
+  const day = getBillDateString(bill)
+  if (day) return istDayStart(day)
+  return toDate(bill.createdAt)
 }
 
 async function fetchCustomerBills(customerId: string): Promise<Bill[]> {
@@ -90,7 +96,7 @@ function computeBalance(
   const created = toDate(customer.createdAt)
   if (created) activityTimes.push(created.getTime())
   for (const b of bills) {
-    const d = toDate(b.createdAt)
+    const d = billActivityDate(b)
     if (d) activityTimes.push(d.getTime())
   }
   for (const tx of transactions) {
@@ -142,7 +148,7 @@ function computeMonthlyClosings(
   }
 
   for (const bill of bills) {
-    const d = toDate(bill.createdAt) ?? new Date(0)
+    const d = billActivityDate(bill) ?? new Date(0)
     events.push({ date: d, delta: bill.grandTotal })
     const billTxs = txByBill[bill.billId] ?? []
     let txCredits = 0

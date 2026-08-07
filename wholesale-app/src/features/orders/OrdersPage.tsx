@@ -32,6 +32,7 @@ import { todayIst, toIstDateString, addIstDays, istMonthRange } from '@/lib/istD
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/ui/numeric-input'
+import { ProductSelect } from '@/components/ui/product-select'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -154,6 +155,7 @@ export default function OrdersPage() {
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
   const [deleteOrder, setDeleteOrder] = useState<Order | null>(null)
   const [rejectConfirm, setRejectConfirm] = useState<{ order: Order; status: OrderStatus } | null>(null)
+  const [deliverConvertPrompt, setDeliverConvertPrompt] = useState<Order | null>(null)
   const [sharingPdf, setSharingPdf] = useState(false)
   const [customerSearch, setCustomerSearch] = useState('')
 
@@ -389,14 +391,25 @@ export default function OrdersPage() {
   })
 
   const updateStatusMutation = useMutation({
-    mutationFn: ({ orderId, status }: { orderId: string; status: OrderStatus }) =>
-      orderRepository.updateStatus(orderId, status),
-    onSuccess: () => {
+    mutationFn: ({ order, status }: { order: Order; status: OrderStatus }) =>
+      orderRepository.updateStatus(order.orderId, status),
+    onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       toast.success('Order status updated')
+      if (vars.status === 'DELIVERED' && !vars.order.billId) {
+        setDeliverConvertPrompt({ ...vars.order, status: 'DELIVERED' })
+      }
     },
     onError: () => toast.error('Failed to update status'),
   })
+
+  const requestStatusChange = (order: Order, status: OrderStatus) => {
+    if (status === 'REJECTED') {
+      setRejectConfirm({ order, status })
+      return
+    }
+    updateStatusMutation.mutate({ order, status })
+  }
 
   const updateMutation = useMutation({
     mutationFn: async ({ orderId, data }: { orderId: string; data: OrderFormData }) => {
@@ -449,6 +462,7 @@ export default function OrdersPage() {
         amountPaid: 0,
         remainingAmount: subtotal,
         paymentStatus: 'UNPAID',
+        billingDate: todayIst(),
       })
       // Mark the order as converted so it cannot be converted again
       await orderRepository.update(order.orderId, { billId: createdBill.billId })
@@ -461,6 +475,7 @@ export default function OrdersPage() {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       toast.success('Order converted to bill!')
       setDetailOrder(null)
+      setDeliverConvertPrompt(null)
     },
     onError: (err) => {
       console.error('Convert to bill failed:', err)
@@ -513,8 +528,14 @@ export default function OrdersPage() {
     }).sort((a, b) => {
       const dateA = a.orderDate || ''
       const dateB = b.orderDate || ''
-      if (dateA !== dateB) return dateA.localeCompare(dateB)
-      return (TIME_SLOT_ORDER[a.timeSlot] ?? 0) - (TIME_SLOT_ORDER[b.timeSlot] ?? 0)
+      // Delivered: newest first; other statuses: earliest date first
+      if (dateA !== dateB) {
+        return filterStatus === 'DELIVERED'
+          ? dateB.localeCompare(dateA)
+          : dateA.localeCompare(dateB)
+      }
+      const slotDiff = (TIME_SLOT_ORDER[a.timeSlot] ?? 0) - (TIME_SLOT_ORDER[b.timeSlot] ?? 0)
+      return filterStatus === 'DELIVERED' ? -slotDiff : slotDiff
     })
   }, [orders, search, filterStatus, filterDateMode, filterSingle, filterFrom, filterTo])
 
@@ -749,13 +770,7 @@ export default function OrdersPage() {
                                 variant="outline"
                                 size="sm"
                                 className="h-7 text-xs"
-                                onClick={() => {
-                                  if (s === 'REJECTED') {
-                                    setRejectConfirm({ order, status: s })
-                                  } else {
-                                    updateStatusMutation.mutate({ orderId: order.orderId, status: s })
-                                  }
-                                }}
+                                onClick={() => requestStatusChange(order, s)}
                                 disabled={updateStatusMutation.isPending}
                               >
                                 <NIcon className={`h-3 w-3 ${nc.color}`} />
@@ -985,16 +1000,14 @@ export default function OrdersPage() {
                         control={control}
                         name={`items.${index}.productId`}
                         render={({ field: f }) => (
-                          <select
-                            {...f}
-                            onChange={(e) => { f.onChange(e); handleProductSelect(index, e.target.value) }}
-                            className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                          >
-                            <option value="">Select product...</option>
-                            {products.map((p) => (
-                              <option key={p.productId} value={p.productId}>{p.productName}</option>
-                            ))}
-                          </select>
+                          <ProductSelect
+                            products={products}
+                            value={f.value}
+                            onChange={(id) => {
+                              f.onChange(id)
+                              void handleProductSelect(index, id)
+                            }}
+                          />
                         )}
                       />
                       <div className="grid grid-cols-2 gap-2">
@@ -1046,16 +1059,16 @@ export default function OrdersPage() {
                               control={control}
                               name={`items.${index}.productId`}
                               render={({ field: f }) => (
-                                <select
-                                  {...f}
-                                  onChange={(e) => { f.onChange(e); handleProductSelect(index, e.target.value) }}
-                                  className="w-36 h-8 rounded-md border border-input bg-transparent px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                                >
-                                  <option value="">Select...</option>
-                                  {products.map((p) => (
-                                    <option key={p.productId} value={p.productId}>{p.productName}</option>
-                                  ))}
-                                </select>
+                                <ProductSelect
+                                  products={products}
+                                  value={f.value}
+                                  onChange={(id) => {
+                                    f.onChange(id)
+                                    void handleProductSelect(index, id)
+                                  }}
+                                  className="w-44"
+                                  placeholder="Select..."
+                                />
                               )}
                             />
                           </td>
@@ -1245,7 +1258,7 @@ export default function OrdersPage() {
               variant="destructive"
               onClick={() => {
                 if (rejectConfirm) {
-                  updateStatusMutation.mutate({ orderId: rejectConfirm.order.orderId, status: rejectConfirm.status })
+                  updateStatusMutation.mutate({ order: rejectConfirm.order, status: rejectConfirm.status })
                   setRejectConfirm(null)
                 }
               }}
@@ -1253,6 +1266,38 @@ export default function OrdersPage() {
             >
               {updateStatusMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Reject Order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Deliver → Convert to Bill prompt ── */}
+      <Dialog open={!!deliverConvertPrompt} onOpenChange={(open) => { if (!open) setDeliverConvertPrompt(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-blue-600" />
+              Convert to Bill?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Order{' '}
+            <strong className="text-gray-900 dark:text-white">{deliverConvertPrompt?.orderNumber}</strong> for{' '}
+            <strong className="text-gray-900 dark:text-white">{deliverConvertPrompt?.customerInfo.name}</strong>{' '}
+            is marked delivered and has not been billed yet. Convert it to a bill now?
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeliverConvertPrompt(null)} disabled={convertToBillMutation.isPending}>
+              Not now
+            </Button>
+            <Button
+              onClick={() => {
+                if (deliverConvertPrompt) convertToBillMutation.mutate(deliverConvertPrompt)
+              }}
+              disabled={convertToBillMutation.isPending}
+            >
+              {convertToBillMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Convert to Bill
             </Button>
           </DialogFooter>
         </DialogContent>

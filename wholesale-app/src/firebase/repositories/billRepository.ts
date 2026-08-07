@@ -5,7 +5,6 @@ import {
   getDoc,
   addDoc,
   updateDoc,
-  serverTimestamp,
   query,
   orderBy,
   where,
@@ -20,7 +19,12 @@ import { COLLECTIONS } from '@/firebase/collections'
 import { settingsRepository } from './settingsRepository'
 import { sanitizeFirestoreData } from '@/lib/firestoreUtils'
 import { customerBalanceRepository } from './customerBalanceRepository'
+import { istDayStart, todayIst } from '@/lib/istDate'
 import type { Bill } from '@/types'
+
+function timestampFromBillingDate(billingDate?: string): Timestamp {
+  return Timestamp.fromDate(istDayStart(billingDate || todayIst()))
+}
 
 const billsRef = () => collection(db, COLLECTIONS.BILLS)
 
@@ -116,21 +120,30 @@ export const billRepository = {
   },
 
   async create(data: Omit<Bill, 'billId' | 'createdAt'>): Promise<Bill> {
+    const billingDate = data.billingDate || todayIst()
+    const createdAt = timestampFromBillingDate(billingDate)
     const clean = sanitizeFirestoreData({
       ...data,
+      billingDate,
       customerInfo: sanitizeFirestoreData(data.customerInfo as unknown as Record<string, unknown>),
     } as Record<string, unknown>)
     const docRef = await addDoc(billsRef(), {
       ...clean,
-      createdAt: serverTimestamp(),
+      billingDate,
+      createdAt,
     })
     await syncBalance(data.customerId)
-    return { ...data, billId: docRef.id, createdAt: serverTimestamp() } as Bill
+    return { ...data, billingDate, billId: docRef.id, createdAt }
   },
 
   async update(billId: string, data: Partial<Bill>): Promise<void> {
     const existing = await this.getById(billId)
-    const clean = sanitizeFirestoreData(data as Record<string, unknown>)
+    const patch: Partial<Bill> = { ...data }
+    if (data.billingDate) {
+      patch.billingDate = data.billingDate
+      patch.createdAt = timestampFromBillingDate(data.billingDate)
+    }
+    const clean = sanitizeFirestoreData(patch as Record<string, unknown>)
     await updateDoc(doc(db, COLLECTIONS.BILLS, billId), clean)
     const customerId = data.customerId ?? existing?.customerId
     await syncBalance(customerId)

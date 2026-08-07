@@ -88,6 +88,16 @@ export function isSameIstDay(date: Date, yyyyMmDd: string): boolean {
   return toIstDateString(date) === yyyyMmDd
 }
 
+/** Prefer user-selected billingDate; fall back to createdAt (IST). */
+export function getBillDateString(bill: {
+  billingDate?: string
+  createdAt?: { toDate?: () => Date }
+}): string | null {
+  if (bill.billingDate) return bill.billingDate
+  if (bill.createdAt?.toDate) return toIstDateString(bill.createdAt.toDate())
+  return null
+}
+
 export const MONTH_LABELS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',

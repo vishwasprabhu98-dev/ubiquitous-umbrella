@@ -1,6 +1,6 @@
 import type { Bill, Customer, CustomerBalance, PurchaseInvoice, Transaction } from '@/types'
 import { LEDGER_PAYMENT_REF } from '@/firebase/repositories/customerBalanceRepository.constants'
-import { toIstMonthKey } from '@/lib/istDate'
+import { getBillDateString, istDayStart, toIstMonthKey } from '@/lib/istDate'
 
 export interface LedgerRow {
   id: string
@@ -49,6 +49,12 @@ export function toDate(ts: unknown): Date | undefined {
   return undefined
 }
 
+function billActivityDate(bill: Bill): Date | undefined {
+  const day = getBillDateString(bill)
+  if (day) return istDayStart(day)
+  return toDate(bill.createdAt)
+}
+
 export function buildLedgerRows(
   bills: Bill[],
   transactions: Transaction[],
@@ -93,7 +99,7 @@ export function buildLedgerRows(
   for (const bill of bills) {
     rows.push({
       id: `bill-${bill.billId}`,
-      date: toDate(bill.createdAt),
+      date: billActivityDate(bill),
       description: bill.movedToLedger
         ? `${bill.billNumber} (On Ledger)`
         : bill.billNumber,
@@ -123,7 +129,7 @@ export function buildLedgerRows(
     if (unrecordedPaid > 0.001) {
       rows.push({
         id: `bill-paid-${bill.billId}`,
-        date: toDate(bill.createdAt),
+        date: billActivityDate(bill),
         description: 'Payment received',
         type: 'payment',
         debit: 0,
@@ -377,7 +383,7 @@ export function buildNewCustomerLedger(
       totalBilled: bill.grandTotal,
       totalPaid: bill.amountPaid,
       outstanding: bill.remainingAmount,
-      lastBillDate: toDate(bill.createdAt),
+      lastBillDate: billActivityDate(bill),
       bills: [bill],
       ledgerRows: [],
     }))

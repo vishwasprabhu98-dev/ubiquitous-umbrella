@@ -64,6 +64,8 @@ export interface Product {
   basePrice: number
   gstPercentage: number
   unit: string
+  /** Prefer in product pickers (billing / orders / purchases) */
+  starred?: boolean
   createdAt: Timestamp
 }
 
@@ -125,6 +127,8 @@ export interface Bill {
   paymentStatus: PaymentStatus
   movedToLedger?: boolean
   comment?: string
+  /** YYYY-MM-DD (IST), user-selected invoice date */
+  billingDate?: string
   createdAt: Timestamp
 }
 

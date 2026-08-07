@@ -17,10 +17,11 @@ import {
   Filter,
   X,
   BookOpen,
+  Undo2,
   Share2,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { toIstDateString, todayIst, addIstDays, istMonthRange } from '@/lib/istDate'
+import { todayIst, addIstDays, istMonthRange, getBillDateString, istDayStart } from '@/lib/istDate'
 import { billRepository } from '@/firebase/repositories/billRepository'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
@@ -30,6 +31,7 @@ import { transactionRepository } from '@/firebase/repositories/transactionReposi
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/ui/numeric-input'
+import { ProductSelect } from '@/components/ui/product-select'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -81,6 +83,7 @@ interface BillFormData {
   amountPaid: number
   isGstBill: boolean
   comment?: string
+  billingDate: string
 }
 
 function BillCard({
@@ -89,14 +92,17 @@ function BillCard({
   onEdit,
   onPayment,
   onMoveToLedger,
+  onRemoveFromLedger,
 }: {
   bill: Bill
   onView: (b: Bill) => void
   onEdit: (b: Bill) => void
   onPayment: (b: Bill) => void
   onMoveToLedger: (b: Bill) => void
+  onRemoveFromLedger: (b: Bill) => void
 }) {
   const isPaid = bill.paymentStatus === 'PAID'
+  const billDay = getBillDateString(bill)
   return (
     <Card
       className="hover:shadow-sm transition-shadow cursor-pointer"
@@ -132,7 +138,7 @@ function BillCard({
             </div>
             <p className="font-semibold mt-1 text-gray-900 dark:text-white truncate">{bill.customerInfo.name}</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              {bill.createdAt?.toDate ? formatDate(bill.createdAt.toDate()) : '—'}
+              {billDay ? formatDate(istDayStart(billDay)) : '—'}
             </p>
             {bill.comment && (
               <p className="text-xs text-gray-400 italic mt-0.5 line-clamp-1">{bill.comment}</p>
@@ -144,10 +150,12 @@ function BillCard({
             <p className="font-bold text-gray-900 dark:text-white">{formatCurrency(bill.grandTotal)}</p>
             {bill.amountPaid > 0 && (
               <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
-                Paid: {formatCurrency(bill.amountPaid)}
+                {bill.movedToLedger && bill.amountPaid < bill.grandTotal - 0.01
+                  ? `Partial paid: ${formatCurrency(bill.amountPaid)}`
+                  : `Paid: ${formatCurrency(bill.amountPaid)}`}
               </p>
             )}
-            {bill.remainingAmount > 0 && (
+            {!bill.movedToLedger && bill.remainingAmount > 0 && (
               <p className="text-xs text-red-500 mt-0.5">Due: {formatCurrency(bill.remainingAmount)}</p>
             )}
           </div>
@@ -163,7 +171,7 @@ function BillCard({
               <Edit2 className="h-3 w-3" /> Edit
             </Button>
           )}
-          {bill.remainingAmount > 0 && (
+          {!bill.movedToLedger && bill.remainingAmount > 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -174,7 +182,7 @@ function BillCard({
             </Button>
           )}
           {/* Move to Ledger — only for existing (registered) customers with outstanding amount */}
-          {bill.customerId && bill.remainingAmount > 0 && !bill.movedToLedger && (
+          {bill.customerId && !bill.movedToLedger && bill.remainingAmount > 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -182,6 +190,16 @@ function BillCard({
               onClick={() => onMoveToLedger(bill)}
             >
               <BookOpen className="h-3 w-3" /> Move to Ledger
+            </Button>
+          )}
+          {bill.movedToLedger && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1 border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900"
+              onClick={() => onRemoveFromLedger(bill)}
+            >
+              <Undo2 className="h-3 w-3" /> Remove from Ledger
             </Button>
           )}
         </div>
@@ -232,7 +250,7 @@ export default function BillingPage() {
   const [filterTo, setFilterTo] = useState(() => getPresetRange('last7').to)
   const [filterSingle, setFilterSingle] = useState('')
   const [filterDateMode, setFilterDateMode] = useState<'range' | 'single'>('range')
-  const [filterPayStatus, setFilterPayStatus] = useState<PaymentStatus | 'ALL'>('ALL')
+  const [filterPayStatus, setFilterPayStatus] = useState<PaymentStatus | 'ALL'>('UNPAID')
   const [page, setPage] = useState(1)
 
   // Payment dialog state
@@ -255,14 +273,14 @@ export default function BillingPage() {
 
   const resetFilters = () => {
     applyPreset('last7')
-    setFilterPayStatus('ALL')
+    setFilterPayStatus('UNPAID')
     setSearch('')
   }
 
   const activeFilterCount = useMemo(() => {
     let count = 0
     if (datePreset !== 'last7') count++
-    if (filterPayStatus !== 'ALL') count++
+    if (filterPayStatus !== 'UNPAID') count++
     return count
   }, [datePreset, filterPayStatus])
 
@@ -301,6 +319,7 @@ export default function BillingPage() {
       discount: 0,
       amountPaid: 0,
       isGstBill: false,
+      billingDate: todayIst(),
     },
   })
 
@@ -370,6 +389,7 @@ export default function BillingPage() {
       amountPaid: 0,
       isGstBill: false,
       comment: '',
+      billingDate: todayIst(),
     })
     setFormOpen(true)
   }
@@ -390,6 +410,7 @@ export default function BillingPage() {
         amountPaid: bill.amountPaid,
         isGstBill: bill.isGstBill ?? false,
         comment: bill.comment ?? '',
+        billingDate: getBillDateString(bill) || todayIst(),
       })
       setFormOpen(true)
     },
@@ -478,6 +499,7 @@ export default function BillingPage() {
         remainingAmount: Math.max(0, remaining),
         paymentStatus,
         ...(data.comment?.trim() ? { comment: data.comment.trim() } : {}),
+        billingDate: data.billingDate || todayIst(),
       })
     },
     onSuccess: () => {
@@ -523,6 +545,7 @@ export default function BillingPage() {
         remainingAmount: remaining,
         paymentStatus,
         comment: data.comment?.trim() ?? '',
+        billingDate: data.billingDate || todayIst(),
       })
     },
     onSuccess: () => {
@@ -538,8 +561,13 @@ export default function BillingPage() {
 
   const moveToLedgerMutation = useMutation({
     mutationFn: (bill: Bill) =>
-      // Keep paymentStatus / remainingAmount unchanged — ledger tracks the outstanding, not a payment.
-      billRepository.update(bill.billId, { movedToLedger: true }),
+      billRepository.update(bill.billId, {
+        movedToLedger: true,
+        paymentStatus: 'PAID',
+        status: 'DONE',
+        // Keep amountPaid; clear bill-level due — outstanding lives on the ledger.
+        remainingAmount: 0,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
@@ -548,6 +576,28 @@ export default function BillingPage() {
       toast.success('Bill moved to customer ledger')
     },
     onError: () => toast.error('Failed to move bill to ledger'),
+  })
+
+  const removeFromLedgerMutation = useMutation({
+    mutationFn: (bill: Bill) => {
+      const remaining = Math.max(0, bill.grandTotal - bill.amountPaid)
+      const paymentStatus: PaymentStatus =
+        remaining <= 0 ? 'PAID' : bill.amountPaid > 0 ? 'PARTIAL' : 'UNPAID'
+      return billRepository.update(bill.billId, {
+        movedToLedger: false,
+        remainingAmount: remaining,
+        paymentStatus,
+        status: statusFromPayment(paymentStatus),
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bills'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
+      toast.success('Bill removed from ledger')
+    },
+    onError: () => toast.error('Failed to remove bill from ledger'),
   })
 
   const handlePaymentSubmit = async () => {
@@ -611,9 +661,8 @@ export default function BillingPage() {
       if (filterPayStatus !== 'ALL' && b.paymentStatus !== filterPayStatus) return false
 
       // Date filter (IST calendar days)
-      const created = b.createdAt?.toDate ? b.createdAt.toDate() : null
-      if (created) {
-        const billDay = toIstDateString(created)
+      const billDay = getBillDateString(b)
+      if (billDay) {
         if (filterDateMode === 'single' && filterSingle) {
           if (billDay !== filterSingle) return false
         } else {
@@ -625,6 +674,9 @@ export default function BillingPage() {
       return true
     })
       .sort((a, b) => {
+        const da = getBillDateString(a) ?? ''
+        const db = getBillDateString(b) ?? ''
+        if (da !== db) return db.localeCompare(da)
         const ta = a.createdAt?.toDate?.()?.getTime?.() ?? 0
         const tb = b.createdAt?.toDate?.()?.getTime?.() ?? 0
         return tb - ta
@@ -887,6 +939,7 @@ export default function BillingPage() {
                 onEdit={openEdit}
                 onPayment={openPaymentDialog}
                 onMoveToLedger={(b) => moveToLedgerMutation.mutate(b)}
+                onRemoveFromLedger={(b) => removeFromLedgerMutation.mutate(b)}
               />
             ))}
           </div>
@@ -1063,6 +1116,17 @@ export default function BillingPage() {
               </div>
             )}
 
+            <div className="space-y-1.5 sm:max-w-xs">
+              <Label>Billing Date *</Label>
+              <Input
+                type="date"
+                {...register('billingDate', { required: 'Billing date is required' })}
+              />
+              {errors.billingDate && (
+                <p className="text-xs text-red-500">{errors.billingDate.message}</p>
+              )}
+            </div>
+
             {/* Items */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -1101,16 +1165,14 @@ export default function BillingPage() {
                         control={control}
                         name={`items.${index}.productId`}
                         render={({ field: f }) => (
-                          <select
-                            {...f}
-                            onChange={(e) => { f.onChange(e); void handleProductSelect(index, e.target.value) }}
-                            className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                          >
-                            <option value="">Select product...</option>
-                            {products.map((p) => (
-                              <option key={p.productId} value={p.productId}>{p.productName}</option>
-                            ))}
-                          </select>
+                          <ProductSelect
+                            products={products}
+                            value={f.value}
+                            onChange={(id) => {
+                              f.onChange(id)
+                              void handleProductSelect(index, id)
+                            }}
+                          />
                         )}
                       />
                       <div className="grid grid-cols-3 gap-2">
@@ -1170,16 +1232,16 @@ export default function BillingPage() {
                               control={control}
                               name={`items.${index}.productId`}
                               render={({ field: f }) => (
-                                <select
-                                  {...f}
-                                  onChange={(e) => { f.onChange(e); void handleProductSelect(index, e.target.value) }}
-                                  className="w-36 h-8 rounded-md border border-input bg-transparent px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                                >
-                                  <option value="">Select...</option>
-                                  {products.map((p) => (
-                                    <option key={p.productId} value={p.productId}>{p.productName}</option>
-                                  ))}
-                                </select>
+                                <ProductSelect
+                                  products={products}
+                                  value={f.value}
+                                  onChange={(id) => {
+                                    f.onChange(id)
+                                    void handleProductSelect(index, id)
+                                  }}
+                                  className="w-44"
+                                  placeholder="Select..."
+                                />
                               )}
                             />
                           </td>

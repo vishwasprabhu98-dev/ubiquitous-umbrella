@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Plus, Search, Edit2, Trash2, Loader2, Package } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, Loader2, Package, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import { productRepository } from '@/firebase/repositories/productRepository'
 import { getFirestoreErrorMessage } from '@/lib/firestoreUtils'
+import { sortProductsForSelect } from '@/lib/products'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -87,6 +88,16 @@ export default function ProductManagement() {
     onError: (error) => toast.error(getFirestoreErrorMessage(error)),
   })
 
+  const starMutation = useMutation({
+    mutationFn: ({ id, starred }: { id: string; starred: boolean }) =>
+      productRepository.update(id, { starred }),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+      toast.success(vars.starred ? 'Product starred' : 'Star removed')
+    },
+    onError: (error) => toast.error(getFirestoreErrorMessage(error)),
+  })
+
   const openCreate = () => {
     setEditingProduct(null)
     reset({ gstPercentage: 18, unit: 'KG' })
@@ -118,10 +129,12 @@ export default function ProductManagement() {
     }
   }
 
-  const filtered = products.filter(
-    (p) =>
-      p.productName.toLowerCase().includes(search.toLowerCase()) ||
-      p.productId.toLowerCase().includes(search.toLowerCase())
+  const filtered = sortProductsForSelect(
+    products.filter(
+      (p) =>
+        p.productName.toLowerCase().includes(search.toLowerCase()) ||
+        p.productId.toLowerCase().includes(search.toLowerCase())
+    )
   )
 
   return (
@@ -163,6 +176,7 @@ export default function ProductManagement() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-800">
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide w-10"></th>
                 <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Product</th>
                 <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">ID</th>
                 <th className="text-right py-3 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Base Price</th>
@@ -177,6 +191,29 @@ export default function ProductManagement() {
                   key={product.productId}
                   className="border-b border-gray-50 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
                 >
+                  <td className="py-3 px-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title={product.starred ? 'Unstar product' : 'Star product'}
+                      disabled={starMutation.isPending}
+                      onClick={() =>
+                        starMutation.mutate({
+                          id: product.productId,
+                          starred: !product.starred,
+                        })
+                      }
+                    >
+                      <Star
+                        className={`h-3.5 w-3.5 ${
+                          product.starred
+                            ? 'fill-amber-400 text-amber-400'
+                            : 'text-gray-300 hover:text-amber-400'
+                        }`}
+                      />
+                    </Button>
+                  </td>
                   <td className="py-3 px-3 font-medium">{product.productName}</td>
                   <td className="py-3 px-3 font-mono text-xs text-gray-400">{product.productId.slice(0, 8)}</td>
                   <td className="py-3 px-3 text-right font-medium">{formatCurrency(product.basePrice)}</td>

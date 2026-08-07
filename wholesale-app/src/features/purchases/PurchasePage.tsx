@@ -25,6 +25,7 @@ import PurchaseInvoiceView from './PurchaseInvoiceView'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/ui/numeric-input'
+import { ProductSelect } from '@/components/ui/product-select'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -638,20 +639,16 @@ export default function PurchasePage() {
               {fields.map((field, index) => (
                 <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-12 sm:col-span-4 space-y-1">
-                    <select
-                      className="w-full h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                    <ProductSelect
+                      products={products}
                       value={watch(`items.${index}.productId`)}
-                      onChange={(e) => {
-                        setValue(`items.${index}.productId`, e.target.value)
-                        handleProductSelect(index, e.target.value)
+                      onChange={(id) => {
+                        setValue(`items.${index}.productId`, id)
+                        handleProductSelect(index, id)
                       }}
                       disabled={editingPurchase?.status === 'SAVED'}
-                    >
-                      <option value="">Select product</option>
-                      {products.map((p) => (
-                        <option key={p.productId} value={p.productId}>{p.productName}</option>
-                      ))}
-                    </select>
+                      placeholder="Select product"
+                    />
                   </div>
                   <div className="col-span-4 sm:col-span-2">
                     <Controller
