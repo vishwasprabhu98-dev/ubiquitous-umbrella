@@ -7,12 +7,19 @@ import {
   deleteDoc,
   query,
   where,
+  writeBatch,
 } from 'firebase/firestore'
 import { db } from '@/firebase/config'
 import { COLLECTIONS } from '@/firebase/collections'
 import type { CustomerProductPricing } from '@/types'
 
 const pricingRef = () => collection(db, COLLECTIONS.CUSTOMER_PRODUCT_PRICING)
+
+export type CustomerPriceEntry = {
+  productId: string
+  /** null clears custom pricing and falls back to base price */
+  customPrice: number | null
+}
 
 export const pricingRepository = {
   async getAll(): Promise<CustomerProductPricing[]> {
@@ -51,5 +58,38 @@ export const pricingRepository = {
 
   async delete(mappingId: string): Promise<void> {
     await deleteDoc(doc(db, COLLECTIONS.CUSTOMER_PRODUCT_PRICING, mappingId))
+  },
+
+  /** Create, update, or remove custom prices for one customer in a single batch. */
+  async saveForCustomer(customerId: string, entries: CustomerPriceEntry[]): Promise<void> {
+    const existing = await this.getByCustomer(customerId)
+    const byProduct = new Map(existing.map((p) => [p.productId, p]))
+    const batch = writeBatch(db)
+
+    for (const entry of entries) {
+      const current = byProduct.get(entry.productId)
+      if (entry.customPrice === null || Number.isNaN(entry.customPrice)) {
+        if (current) {
+          batch.delete(doc(db, COLLECTIONS.CUSTOMER_PRODUCT_PRICING, current.mappingId))
+        }
+        continue
+      }
+      if (current) {
+        if (current.customPrice !== entry.customPrice) {
+          batch.update(doc(db, COLLECTIONS.CUSTOMER_PRODUCT_PRICING, current.mappingId), {
+            customPrice: entry.customPrice,
+          })
+        }
+      } else {
+        const ref = doc(pricingRef())
+        batch.set(ref, {
+          customerId,
+          productId: entry.productId,
+          customPrice: entry.customPrice,
+        })
+      }
+    }
+
+    await batch.commit()
   },
 }
