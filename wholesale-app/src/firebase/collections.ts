@@ -8,4 +8,5 @@ export const COLLECTIONS = {
   TRANSACTIONS: 'transactions',
   SETTINGS: 'settings',
   PURCHASES: 'purchases',
+  CUSTOMER_BALANCES: 'customerBalances',
 } as const

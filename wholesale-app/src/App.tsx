@@ -4,6 +4,7 @@ import { Toaster } from 'sonner'
 import { useEffect } from 'react'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAuth } from '@/hooks/useAuth'
+import { useShopName } from '@/hooks/useShopName'
 import AppLayout from '@/components/layout/AppLayout'
 import ProtectedRoute from '@/routes/ProtectedRoute'
 import LoginPage from '@/features/auth/LoginPage'
@@ -37,12 +38,18 @@ function AuthInitializer() {
   return null
 }
 
+function ShopNameInitializer() {
+  useShopName()
+  return null
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ThemeInitializer />
         <AuthInitializer />
+        <ShopNameInitializer />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 import {
@@ -10,16 +10,17 @@ import {
   Download,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Edit2,
   CreditCard,
-  Tag,
   Filter,
   X,
   BookOpen,
   Share2,
 } from 'lucide-react'
-import { startOfDay, subDays, startOfMonth, endOfMonth, isValid, parseISO } from 'date-fns'
 import { toast } from 'sonner'
+import { toIstDateString, todayIst, addIstDays, istMonthRange } from '@/lib/istDate'
 import { billRepository } from '@/firebase/repositories/billRepository'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
@@ -46,23 +47,12 @@ import { createBillPdfBlob } from '@/lib/billPdf'
 import type { Bill, BillStatus, PaymentMode, PaymentStatus } from '@/types'
 import InvoiceView from './InvoiceView'
 
-const BILL_STATUS_STYLES: Record<BillStatus, string> = {
-  PENDING: 'bg-gray-100 text-gray-700 dark:bg-[#2a3040] dark:text-gray-300',
-  ORDER_ACCEPTED: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-  ORDER_DELIVERED: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',
-  PAYMENT_PENDING: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
-  DONE: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-  PARTIAL_PAYMENT: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
+/** Keep Bill.status in sync with payment for older flows (ledger move, etc.). */
+function statusFromPayment(paymentStatus: PaymentStatus): BillStatus {
+  if (paymentStatus === 'PAID') return 'DONE'
+  if (paymentStatus === 'PARTIAL') return 'PARTIAL_PAYMENT'
+  return 'PENDING'
 }
-
-const ALL_STATUSES: { value: BillStatus; label: string }[] = [
-  { value: 'PENDING', label: 'Pending' },
-  { value: 'ORDER_ACCEPTED', label: 'Order Accepted' },
-  { value: 'ORDER_DELIVERED', label: 'Order Delivered' },
-  { value: 'PAYMENT_PENDING', label: 'Payment Pending' },
-  { value: 'PARTIAL_PAYMENT', label: 'Partial Payment' },
-  { value: 'DONE', label: 'Done' },
-]
 
 const PAYMENT_MODES: { value: PaymentMode; label: string }[] = [
   { value: 'CASH', label: 'Cash' },
@@ -89,7 +79,6 @@ interface BillFormData {
   }[]
   discount: number
   amountPaid: number
-  status: BillStatus
   isGstBill: boolean
   comment?: string
 }
@@ -98,18 +87,16 @@ function BillCard({
   bill,
   onView,
   onEdit,
-  onStatus,
   onPayment,
   onMoveToLedger,
 }: {
   bill: Bill
   onView: (b: Bill) => void
   onEdit: (b: Bill) => void
-  onStatus: (b: Bill) => void
   onPayment: (b: Bill) => void
   onMoveToLedger: (b: Bill) => void
 }) {
-  const isDone = bill.status === 'DONE'
+  const isPaid = bill.paymentStatus === 'PAID'
   return (
     <Card
       className="hover:shadow-sm transition-shadow cursor-pointer"
@@ -122,17 +109,19 @@ function BillCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="font-mono text-xs text-blue-600 font-semibold">{bill.billNumber}</span>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${BILL_STATUS_STYLES[bill.status]}`}>
-                {bill.status.replace(/_/g, ' ')}
-              </span>
               {bill.paymentStatus === 'PAID' && (
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
-                  Paid ✓
+                  Paid
                 </span>
               )}
               {bill.paymentStatus === 'PARTIAL' && (
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300">
                   Partial
+                </span>
+              )}
+              {bill.paymentStatus === 'UNPAID' && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
+                  Unpaid
                 </span>
               )}
               {bill.movedToLedger && (
@@ -158,7 +147,7 @@ function BillCard({
                 Paid: {formatCurrency(bill.amountPaid)}
               </p>
             )}
-            {bill.remainingAmount > 0 && !bill.movedToLedger && (
+            {bill.remainingAmount > 0 && (
               <p className="text-xs text-red-500 mt-0.5">Due: {formatCurrency(bill.remainingAmount)}</p>
             )}
           </div>
@@ -169,14 +158,11 @@ function BillCard({
           className="flex items-center justify-end gap-1.5 flex-wrap pt-1 border-t border-gray-100 dark:border-[#2a3040]"
           onClick={(e) => e.stopPropagation()}
         >
-          {!isDone && (
+          {!isPaid && (
             <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => onEdit(bill)}>
               <Edit2 className="h-3 w-3" /> Edit
             </Button>
           )}
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => onStatus(bill)}>
-            <Tag className="h-3 w-3" /> Status
-          </Button>
           {bill.remainingAmount > 0 && (
             <Button
               variant="outline"
@@ -206,25 +192,23 @@ function BillCard({
 
 type DatePreset = 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'custom'
 
-function toInputDate(d: Date) {
-  return d.toISOString().slice(0, 10)
-}
+const BILL_PAGE_SIZE = 25
 
 function getPresetRange(preset: DatePreset): { from: string; to: string } {
-  const today = new Date()
+  const today = todayIst()
   switch (preset) {
     case 'today':
-      return { from: toInputDate(today), to: toInputDate(today) }
+      return { from: today, to: today }
     case 'yesterday': {
-      const y = subDays(today, 1)
-      return { from: toInputDate(y), to: toInputDate(y) }
+      const y = addIstDays(today, -1)
+      return { from: y, to: y }
     }
     case 'last7':
-      return { from: toInputDate(subDays(today, 6)), to: toInputDate(today) }
+      return { from: addIstDays(today, -6), to: today }
     case 'last30':
-      return { from: toInputDate(subDays(today, 29)), to: toInputDate(today) }
+      return { from: addIstDays(today, -29), to: today }
     case 'thisMonth':
-      return { from: toInputDate(startOfMonth(today)), to: toInputDate(endOfMonth(today)) }
+      return istMonthRange(today)
     default:
       return { from: '', to: '' }
   }
@@ -249,11 +233,7 @@ export default function BillingPage() {
   const [filterSingle, setFilterSingle] = useState('')
   const [filterDateMode, setFilterDateMode] = useState<'range' | 'single'>('range')
   const [filterPayStatus, setFilterPayStatus] = useState<PaymentStatus | 'ALL'>('ALL')
-  const [filterBillStatus, setFilterBillStatus] = useState<BillStatus | 'ALL'>('ALL')
-
-  // Status dialog state
-  const [statusBill, setStatusBill] = useState<Bill | null>(null)
-  const [pendingStatus, setPendingStatus] = useState<BillStatus>('PENDING')
+  const [page, setPage] = useState(1)
 
   // Payment dialog state
   const [paymentBill, setPaymentBill] = useState<Bill | null>(null)
@@ -276,7 +256,6 @@ export default function BillingPage() {
   const resetFilters = () => {
     applyPreset('last7')
     setFilterPayStatus('ALL')
-    setFilterBillStatus('ALL')
     setSearch('')
   }
 
@@ -284,9 +263,8 @@ export default function BillingPage() {
     let count = 0
     if (datePreset !== 'last7') count++
     if (filterPayStatus !== 'ALL') count++
-    if (filterBillStatus !== 'ALL') count++
     return count
-  }, [datePreset, filterPayStatus, filterBillStatus])
+  }, [datePreset, filterPayStatus])
 
   const { data: bills = [], isLoading } = useQuery({
     queryKey: ['bills'],
@@ -322,7 +300,6 @@ export default function BillingPage() {
       items: [{ productId: '', productName: '', quantity: 1, unitRate: 0, itemDiscount: 0, gstPercentage: 0, total: 0 }],
       discount: 0,
       amountPaid: 0,
-      status: 'PENDING',
       isGstBill: false,
     },
   })
@@ -391,7 +368,6 @@ export default function BillingPage() {
       items: [{ productId: '', productName: '', quantity: 1, unitRate: 0, itemDiscount: 0, gstPercentage: 0, total: 0 }],
       discount: 0,
       amountPaid: 0,
-      status: 'PENDING',
       isGstBill: false,
       comment: '',
     })
@@ -412,7 +388,6 @@ export default function BillingPage() {
         items: bill.items.map((i) => ({ ...i })),
         discount: bill.discount,
         amountPaid: bill.amountPaid,
-        status: bill.status,
         isGstBill: bill.isGstBill ?? false,
         comment: bill.comment ?? '',
       })
@@ -462,11 +437,6 @@ export default function BillingPage() {
     }
   }
 
-  const openStatusDialog = (bill: Bill) => {
-    setStatusBill(bill)
-    setPendingStatus(bill.status)
-  }
-
   const openPaymentDialog = (bill: Bill) => {
     setPaymentBill(bill)
     setPayAmount('')
@@ -503,7 +473,7 @@ export default function BillingPage() {
         gstAmount,
         grandTotal: grand,
         isGstBill: data.isGstBill,
-        status: data.status,
+        status: statusFromPayment(paymentStatus),
         amountPaid: amtPaid,
         remainingAmount: Math.max(0, remaining),
         paymentStatus,
@@ -512,6 +482,9 @@ export default function BillingPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       toast.success('Bill created successfully!')
       closeForm()
     },
@@ -545,7 +518,7 @@ export default function BillingPage() {
         gstAmount,
         grandTotal: grand,
         isGstBill: data.isGstBill,
-        status: data.status,
+        status: statusFromPayment(paymentStatus),
         amountPaid: amtPaid,
         remainingAmount: remaining,
         paymentStatus,
@@ -554,6 +527,9 @@ export default function BillingPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       toast.success('Bill updated successfully!')
       closeForm()
     },
@@ -562,23 +538,16 @@ export default function BillingPage() {
 
   const moveToLedgerMutation = useMutation({
     mutationFn: (bill: Bill) =>
-      billRepository.update(bill.billId, { movedToLedger: true, status: 'DONE' }),
+      // Keep paymentStatus / remainingAmount unchanged — ledger tracks the outstanding, not a payment.
+      billRepository.update(bill.billId, { movedToLedger: true }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
-      toast.success('Bill moved to ledger and marked as done')
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
+      toast.success('Bill moved to customer ledger')
     },
     onError: () => toast.error('Failed to move bill to ledger'),
-  })
-
-  const statusMutation = useMutation({
-    mutationFn: (status: BillStatus) =>
-      billRepository.update(statusBill!.billId, { status }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['bills'] })
-      toast.success('Status updated')
-      setStatusBill(null)
-    },
-    onError: () => toast.error('Failed to update status'),
   })
 
   const handlePaymentSubmit = async () => {
@@ -596,14 +565,13 @@ export default function BillingPage() {
     try {
       const newAmountPaid = paymentBill.amountPaid + amount
       const newRemaining = Math.max(0, paymentBill.grandTotal - newAmountPaid)
-      const newPaymentStatus = newRemaining <= 0 ? 'PAID' : 'PARTIAL'
-      const newStatus: BillStatus = newRemaining <= 0 ? 'DONE' : paymentBill.status
+      const newPaymentStatus: PaymentStatus = newRemaining <= 0 ? 'PAID' : 'PARTIAL'
 
       await billRepository.update(paymentBill.billId, {
         amountPaid: newAmountPaid,
         remainingAmount: newRemaining,
         paymentStatus: newPaymentStatus,
-        status: newStatus,
+        status: statusFromPayment(newPaymentStatus),
       })
 
       if (paymentBill.customerId) {
@@ -617,6 +585,9 @@ export default function BillingPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ['bills'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       toast.success(`Payment of ${formatCurrency(amount)} recorded`)
       setPaymentBill(null)
     } catch {
@@ -627,7 +598,8 @@ export default function BillingPage() {
   }
 
   const filteredBills = useMemo(() => {
-    return bills.filter((b) => {
+    return bills
+      .filter((b) => {
       // Text search
       const q = search.toLowerCase()
       const billNo = b.billNumber?.toLowerCase() ?? ''
@@ -638,31 +610,41 @@ export default function BillingPage() {
       // Payment status
       if (filterPayStatus !== 'ALL' && b.paymentStatus !== filterPayStatus) return false
 
-      // Bill status
-      if (filterBillStatus !== 'ALL' && b.status !== filterBillStatus) return false
-
-      // Date filter
-      const billDate = b.createdAt?.toDate ? startOfDay(b.createdAt.toDate()) : null
-      if (billDate) {
+      // Date filter (IST calendar days)
+      const created = b.createdAt?.toDate ? b.createdAt.toDate() : null
+      if (created) {
+        const billDay = toIstDateString(created)
         if (filterDateMode === 'single' && filterSingle) {
-          const singleDay = parseISO(filterSingle)
-          if (isValid(singleDay) && billDate.getTime() !== startOfDay(singleDay).getTime())
-            return false
+          if (billDay !== filterSingle) return false
         } else {
-          if (filterFrom) {
-            const from = parseISO(filterFrom)
-            if (isValid(from) && billDate < startOfDay(from)) return false
-          }
-          if (filterTo) {
-            const to = parseISO(filterTo)
-            if (isValid(to) && billDate > startOfDay(to)) return false
-          }
+          if (filterFrom && billDay < filterFrom) return false
+          if (filterTo && billDay > filterTo) return false
         }
       }
 
       return true
     })
-  }, [bills, search, filterPayStatus, filterBillStatus, filterDateMode, filterSingle, filterFrom, filterTo])
+      .sort((a, b) => {
+        const ta = a.createdAt?.toDate?.()?.getTime?.() ?? 0
+        const tb = b.createdAt?.toDate?.()?.getTime?.() ?? 0
+        return tb - ta
+      })
+  }, [bills, search, filterPayStatus, filterDateMode, filterSingle, filterFrom, filterTo])
+
+  const totalBillPages = Math.max(1, Math.ceil(filteredBills.length / BILL_PAGE_SIZE))
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, filterPayStatus, filterDateMode, filterSingle, filterFrom, filterTo])
+
+  useEffect(() => {
+    if (page > totalBillPages) setPage(totalBillPages)
+  }, [page, totalBillPages])
+
+  const paginatedBills = useMemo(
+    () => filteredBills.slice((page - 1) * BILL_PAGE_SIZE, page * BILL_PAGE_SIZE),
+    [filteredBills, page]
+  )
 
   const filteredCustomers = customers.filter(
     (c) =>
@@ -821,63 +803,32 @@ export default function BillingPage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Payment status */}
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Payment Status
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(
-                      [
-                        { value: 'ALL', label: 'All' },
-                        { value: 'UNPAID', label: 'Unpaid' },
-                        { value: 'PARTIAL', label: 'Partial' },
-                        { value: 'PAID', label: 'Paid' },
-                      ] as { value: PaymentStatus | 'ALL'; label: string }[]
-                    ).map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => setFilterPayStatus(opt.value)}
-                        className={`text-xs px-3 py-1 rounded-full border transition-colors ${
-                          filterPayStatus === opt.value
-                            ? 'bg-blue-600 text-white border-blue-600'
-                            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-400 hover:text-blue-600'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Bill status */}
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Bill Status
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(
-                      [
-                        { value: 'ALL', label: 'All' },
-                        ...ALL_STATUSES,
-                      ] as { value: BillStatus | 'ALL'; label: string }[]
-                    ).map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => setFilterBillStatus(opt.value)}
-                        className={`text-xs px-3 py-1 rounded-full border transition-colors ${
-                          filterBillStatus === opt.value
-                            ? 'bg-blue-600 text-white border-blue-600'
-                            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-400 hover:text-blue-600'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Payment Status
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { value: 'ALL', label: 'All' },
+                      { value: 'PAID', label: 'Paid' },
+                      { value: 'UNPAID', label: 'Unpaid' },
+                      { value: 'PARTIAL', label: 'Partial' },
+                    ] as { value: PaymentStatus | 'ALL'; label: string }[]
+                  ).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setFilterPayStatus(opt.value)}
+                      className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                        filterPayStatus === opt.value
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-400 hover:text-blue-600'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </CardContent>
@@ -897,8 +848,9 @@ export default function BillingPage() {
               : filterFrom && filterTo
               ? ` from ${filterFrom} to ${filterTo}`
               : ''}
-            {filterPayStatus !== 'ALL' ? ` · ${filterPayStatus} payments` : ''}
-            {filterBillStatus !== 'ALL' ? ` · ${filterBillStatus.replace(/_/g, ' ')}` : ''}
+            {filterPayStatus !== 'ALL'
+              ? ` · ${filterPayStatus === 'PAID' ? 'Paid' : filterPayStatus === 'PARTIAL' ? 'Partial' : 'Unpaid'} payments`
+              : ''}
           </p>
         )}
       </div>
@@ -920,19 +872,50 @@ export default function BillingPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3">
-          {filteredBills.map((bill) => (
-            <BillCard
-              key={bill.billId}
-              bill={bill}
-              onView={setViewBill}
-              onEdit={openEdit}
-              onStatus={openStatusDialog}
-              onPayment={openPaymentDialog}
-              onMoveToLedger={(b) => moveToLedgerMutation.mutate(b)}
-            />
-          ))}
-        </div>
+        <>
+          {filteredBills.length > 0 && (
+            <p className="text-xs text-gray-400">
+              Showing {(page - 1) * BILL_PAGE_SIZE + 1}–{Math.min(page * BILL_PAGE_SIZE, filteredBills.length)} of {filteredBills.length}
+            </p>
+          )}
+          <div className="grid gap-3">
+            {paginatedBills.map((bill) => (
+              <BillCard
+                key={bill.billId}
+                bill={bill}
+                onView={setViewBill}
+                onEdit={openEdit}
+                onPayment={openPaymentDialog}
+                onMoveToLedger={(b) => moveToLedgerMutation.mutate(b)}
+              />
+            ))}
+          </div>
+          {totalBillPages > 1 && (
+            <div className="flex items-center justify-between gap-3 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </Button>
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                Page {page} of {totalBillPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalBillPages}
+                onClick={() => setPage((p) => Math.min(totalBillPages, p + 1))}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {/* ── Create / Edit Bill Dialog ── */}
@@ -1321,17 +1304,6 @@ export default function BillingPage() {
                           {formatCurrency(Math.max(0, remainingAmount))}
                         </span>
                       </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Bill Status</Label>
-                        <select
-                          {...register('status')}
-                          className="flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                        >
-                          {ALL_STATUSES.map((s) => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                          ))}
-                        </select>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -1364,58 +1336,6 @@ export default function BillingPage() {
               </Button>
             </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Change Status Dialog ── */}
-      <Dialog open={!!statusBill} onOpenChange={(open) => { if (!open) setStatusBill(null) }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Change Bill Status</DialogTitle>
-          </DialogHeader>
-          {statusBill && (
-            <div className="space-y-4">
-              <div className="rounded-lg bg-gray-50 dark:bg-[#252d3d] border border-gray-200 dark:border-[#2a3040] p-3 text-sm space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Bill</span>
-                  <span className="font-mono font-semibold text-blue-600">{statusBill.billNumber}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Customer</span>
-                  <span className="font-medium">{statusBill.customerInfo.name}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-500">Current</span>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${BILL_STATUS_STYLES[statusBill.status]}`}>
-                    {statusBill.status.replace(/_/g, ' ')}
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>New Status</Label>
-                <select
-                  value={pendingStatus}
-                  onChange={(e) => setPendingStatus(e.target.value as BillStatus)}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  {ALL_STATUSES.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setStatusBill(null)}>Cancel</Button>
-            <Button
-              onClick={() => statusMutation.mutate(pendingStatus)}
-              disabled={statusMutation.isPending || pendingStatus === statusBill?.status}
-            >
-              {statusMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Update Status
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1494,7 +1414,7 @@ export default function BillingPage() {
               {payAmount && Number(payAmount) >= paymentBill.remainingAmount - 0.01 && (
                 <div className="rounded-md bg-green-50 dark:bg-green-950/50 border border-green-200 dark:border-green-800 p-2.5">
                   <p className="text-xs text-green-700 dark:text-green-300">
-                    This will mark the bill as <strong>Fully Paid</strong> and set status to <strong>Done</strong>.
+                    This will mark the bill as <strong>Paid</strong>.
                   </p>
                 </div>
               )}

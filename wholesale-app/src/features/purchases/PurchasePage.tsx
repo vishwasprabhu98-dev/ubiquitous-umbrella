@@ -14,6 +14,7 @@ import {
   Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { todayIst } from '@/lib/istDate'
 import { purchaseRepository } from '@/firebase/repositories/purchaseRepository'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { productRepository } from '@/firebase/repositories/productRepository'
@@ -57,7 +58,7 @@ interface PurchaseFormData {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+  return todayIst()
 }
 
 const STATUS_STYLES: Record<PurchaseStatus, string> = {
@@ -225,6 +226,9 @@ export default function PurchasePage() {
     },
     onSuccess: (_, { asDraft }) => {
       queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['purchases', 'vendors-month'] })
       toast.success(asDraft ? 'Draft saved' : 'Purchase invoice saved')
       closeForm()
     },
@@ -238,6 +242,9 @@ export default function PurchasePage() {
     mutationFn: (id: string) => purchaseRepository.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['purchases', 'vendors-month'] })
       toast.success('Draft deleted')
       setDeleteId(null)
     },

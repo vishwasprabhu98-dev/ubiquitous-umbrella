@@ -25,10 +25,36 @@ export interface Customer {
   city?: string
   state?: string
   pincode?: string
+  /** ₹ the customer already owes at start (receivable). */
+  openingBalance?: number
   createdAt: Timestamp
 }
 
 export type CustomerFormData = Omit<Customer, 'customerId' | 'createdAt'>
+
+/** Denormalized ledger summary for fast list views. Doc id = customerId. */
+export interface CustomerBalance {
+  customerId: string
+  openingBalance: number
+  /** Bills grand totals + opening balance */
+  totalBilled: number
+  /** Bill amountPaid + ledger-level payments */
+  totalPaid: number
+  /** SAVED purchases sourced from this customer (credits) */
+  purchaseCredits: number
+  outstanding: number
+  billCount: number
+  lastActivityAt?: Timestamp
+  updatedAt?: Timestamp
+}
+
+/** Month-end running balance under customerBalances/{id}/monthlySnapshots/{YYYY-MM}. */
+export interface CustomerMonthlySnapshot {
+  monthKey: string
+  /** Running balance at end of month (positive = customer owes). */
+  closingBalance: number
+  updatedAt?: Timestamp
+}
 
 // ─── Product ───────────────────────────────────────────────────────────────
 

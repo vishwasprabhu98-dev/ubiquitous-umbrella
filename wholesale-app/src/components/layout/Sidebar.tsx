@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { NAV_ITEMS } from '@/lib/roleAccess'
 import { useUIStore } from '@/stores/uiStore'
 import { useAuthStore } from '@/stores/authStore'
+import { useShopName } from '@/hooks/useShopName'
 import { Button } from '@/components/ui/button'
 import type { UserRole } from '@/types'
 
@@ -32,6 +33,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
 export default function Sidebar() {
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
+  const shopName = useShopName({ syncDocumentTitle: false })
   const { sidebarCollapsed, sidebarOpen, setSidebarOpen, toggleSidebar } = useUIStore()
 
   const role = user?.role ?? 'staff'
@@ -62,7 +64,9 @@ export default function Sidebar() {
               <div className="h-8 w-8 rounded-lg bg-blue-600 flex items-center justify-center">
                 <ShoppingBag className="h-4 w-4 text-white" />
               </div>
-              <span className="font-bold text-gray-900 dark:text-white text-sm">WholesalePro</span>
+              <span className="font-bold text-gray-900 dark:text-white text-sm truncate max-w-[10rem]" title={shopName}>
+                {shopName}
+              </span>
             </div>
           )}
           {sidebarCollapsed && (

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Plus, Search, Edit2, Trash2, Loader2, User } from 'lucide-react'
@@ -9,6 +9,7 @@ import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { getFirestoreErrorMessage } from '@/lib/firestoreUtils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/ui/numeric-input'
 import { Label } from '@/components/ui/label'
 import {
   Dialog,
@@ -19,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { formatCurrency } from '@/lib/utils'
 import type { Customer, CustomerFormData } from '@/types'
 
 const customerSchema = z.object({
@@ -31,6 +33,7 @@ const customerSchema = z.object({
   city: z.string().optional(),
   state: z.string().optional(),
   pincode: z.string().optional(),
+  openingBalance: z.number().min(0, 'Opening balance cannot be negative').optional(),
 })
 
 type FormData = z.infer<typeof customerSchema>
@@ -51,13 +54,18 @@ export default function CustomerManagement() {
     register,
     handleSubmit,
     reset,
+    control,
     formState: { errors, isSubmitting },
-  } = useForm<FormData>({ resolver: zodResolver(customerSchema) })
+  } = useForm<FormData>({
+    resolver: zodResolver(customerSchema),
+    defaultValues: { openingBalance: 0 },
+  })
 
   const createMutation = useMutation({
     mutationFn: (data: CustomerFormData) => customerRepository.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       toast.success('Customer created successfully')
       closeDialog()
     },
@@ -69,6 +77,7 @@ export default function CustomerManagement() {
       customerRepository.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       toast.success('Customer updated successfully')
       closeDialog()
     },
@@ -79,6 +88,7 @@ export default function CustomerManagement() {
     mutationFn: (id: string) => customerRepository.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       toast.success('Customer deleted')
       setDeleteId(null)
     },
@@ -87,7 +97,7 @@ export default function CustomerManagement() {
 
   const openCreate = () => {
     setEditingCustomer(null)
-    reset({})
+    reset({ openingBalance: 0 })
     setDialogOpen(true)
   }
 
@@ -103,6 +113,7 @@ export default function CustomerManagement() {
       city: customer.city ?? '',
       state: customer.state ?? '',
       pincode: customer.pincode ?? '',
+      openingBalance: customer.openingBalance ?? 0,
     })
     setDialogOpen(true)
   }
@@ -110,14 +121,18 @@ export default function CustomerManagement() {
   const closeDialog = () => {
     setDialogOpen(false)
     setEditingCustomer(null)
-    reset({})
+    reset({ openingBalance: 0 })
   }
 
   const onSubmit = async (data: FormData) => {
+    const payload: CustomerFormData = {
+      ...data,
+      openingBalance: Number(data.openingBalance) || 0,
+    }
     if (editingCustomer) {
-      await updateMutation.mutateAsync({ id: editingCustomer.customerId, data })
+      await updateMutation.mutateAsync({ id: editingCustomer.customerId, data: payload })
     } else {
-      await createMutation.mutateAsync(data as CustomerFormData)
+      await createMutation.mutateAsync(payload)
     }
   }
 
@@ -181,6 +196,11 @@ export default function CustomerManagement() {
                       {customer.city && (
                         <p className="text-xs text-gray-400">
                           {customer.city}{customer.state ? `, ${customer.state}` : ''}
+                        </p>
+                      )}
+                      {(customer.openingBalance ?? 0) > 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                          Opening balance: {formatCurrency(customer.openingBalance ?? 0)}
                         </p>
                       )}
                     </div>
@@ -256,6 +276,27 @@ export default function CustomerManagement() {
               <div className="space-y-1.5">
                 <Label>Pincode</Label>
                 <Input {...register('pincode')} placeholder="400001" />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label>Opening Balance (₹)</Label>
+                <Controller
+                  control={control}
+                  name="openingBalance"
+                  render={({ field }) => (
+                    <NumericInput
+                      value={field.value ?? 0}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      placeholder="0.00"
+                    />
+                  )}
+                />
+                <p className="text-xs text-gray-400">
+                  Amount the customer already owes you before any bills in this system.
+                </p>
+                {errors.openingBalance && (
+                  <p className="text-xs text-red-500">{errors.openingBalance.message}</p>
+                )}
               </div>
             </div>
             <DialogFooter>

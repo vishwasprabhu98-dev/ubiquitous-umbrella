@@ -20,13 +20,15 @@ import {
   Edit2,
   Download,
 } from 'lucide-react'
-import { format, subDays, addDays, addWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { toast } from 'sonner'
 import { orderRepository } from '@/firebase/repositories/orderRepository'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { productRepository } from '@/firebase/repositories/productRepository'
+import { pricingRepository } from '@/firebase/repositories/pricingRepository'
 import { billRepository } from '@/firebase/repositories/billRepository'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
+import { todayIst, toIstDateString, addIstDays, istMonthRange } from '@/lib/istDate'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/ui/numeric-input'
@@ -56,7 +58,7 @@ const TIME_SLOT_STYLE: Record<TimeSlot, string> = {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+  return todayIst()
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -73,17 +75,16 @@ const ORDER_STATUS_CONFIG: Record<
 }
 
 const STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  NEW: ['ACCEPTED', 'REJECTED'],
-  ACCEPTED: ['PROCESSING', 'REJECTED'],
-  PROCESSING: ['DELIVERED'],
+  NEW: ['ACCEPTED', 'REJECTED', 'DELIVERED'],
+  ACCEPTED: ['DELIVERED', 'REJECTED'],
+  PROCESSING: ['DELIVERED', 'REJECTED'],
   DELIVERED: [],
   REJECTED: [],
 }
 
-const ALL_ORDER_STATUSES: { value: OrderStatus; label: string }[] = [
-  { value: 'NEW', label: 'New' },
+/** Statuses shown in the filter bar (not New / Processing). */
+const FILTER_ORDER_STATUSES: { value: OrderStatus; label: string }[] = [
   { value: 'ACCEPTED', label: 'Accepted' },
-  { value: 'PROCESSING', label: 'Processing' },
   { value: 'DELIVERED', label: 'Delivered' },
   { value: 'REJECTED', label: 'Rejected' },
 ]
@@ -92,23 +93,31 @@ const ALL_ORDER_STATUSES: { value: OrderStatus; label: string }[] = [
 
 type DatePreset = 'today' | 'last7next7' | 'thisMonth' | 'nextWeek' | 'custom'
 
-function toInputDate(d: Date) {
-  return d.toISOString().slice(0, 10)
+function istWeekdayMon1(date = new Date()): number {
+  const w = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short',
+  }).format(date)
+  const map: Record<string, number> = {
+    Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+  }
+  return map[w] ?? 1
 }
 
 function getPresetRange(preset: DatePreset): { from: string; to: string } {
-  const today = new Date()
+  const today = todayIst()
   switch (preset) {
     case 'today':
-      return { from: toInputDate(today), to: toInputDate(today) }
+      return { from: today, to: today }
     case 'last7next7':
-      return { from: toInputDate(subDays(today, 6)), to: toInputDate(addDays(today, 7)) }
+      return { from: addIstDays(today, -6), to: addIstDays(today, 7) }
     case 'thisMonth':
-      return { from: toInputDate(startOfMonth(today)), to: toInputDate(endOfMonth(today)) }
+      return istMonthRange(today)
     case 'nextWeek': {
-      const start = startOfWeek(addWeeks(today, 1), { weekStartsOn: 1 })
-      const end = endOfWeek(addWeeks(today, 1), { weekStartsOn: 1 })
-      return { from: toInputDate(start), to: toInputDate(end) }
+      const dow = istWeekdayMon1()
+      const daysUntilNextMon = ((8 - dow) % 7) || 7
+      const from = addIstDays(today, daysUntilNextMon)
+      return { from, to: addIstDays(from, 6) }
     }
     default:
       return { from: '', to: '' }
@@ -155,7 +164,7 @@ export default function OrdersPage() {
   const [filterTo, setFilterTo] = useState(() => getPresetRange('last7next7').to)
   const [filterSingle, setFilterSingle] = useState('')
   const [filterDateMode, setFilterDateMode] = useState<'range' | 'single'>('range')
-  const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL')
+  const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ACCEPTED')
 
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ['orders'],
@@ -184,6 +193,7 @@ export default function OrdersPage() {
     reset,
     setError,
     clearErrors,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<OrderFormData>({
     defaultValues: {
@@ -206,14 +216,19 @@ export default function OrdersPage() {
     return sum + qty * rate
   }, 0)
 
-  const handleProductSelect = (index: number, productId: string) => {
+  const handleProductSelect = async (index: number, productId: string) => {
     const product = products.find((p) => p.productId === productId)
     if (!product) return
+    let price = product.basePrice
+    const customerId = watchCustomerId
+    if (customerId) {
+      price = await pricingRepository.getPrice(customerId, productId, product.basePrice)
+    }
     setValue(`items.${index}.productName`, product.productName)
-    setValue(`items.${index}.unitRate`, product.basePrice)
+    setValue(`items.${index}.unitRate`, price)
   }
 
-  const handleCustomerSelect = (customerId: string) => {
+  const handleCustomerSelect = async (customerId: string) => {
     const customer = customers.find((c) => c.customerId === customerId)
     if (!customer) return
     setValue('customerId', customerId)
@@ -222,6 +237,17 @@ export default function OrdersPage() {
     setValue('customerGst', customer.gstNumber ?? '')
     setCustomerSearch(customer.name)
     clearErrors(['customerName', 'customerPhone', 'customerId'])
+
+    const items = getValues('items') ?? []
+    await Promise.all(
+      items.map(async (item, index) => {
+        if (!item.productId) return
+        const product = products.find((p) => p.productId === item.productId)
+        if (!product) return
+        const price = await pricingRepository.getPrice(customerId, item.productId, product.basePrice)
+        setValue(`items.${index}.unitRate`, price)
+      })
+    )
   }
 
   const onSubmitOrder = async (data: OrderFormData) => {
@@ -348,7 +374,7 @@ export default function OrdersPage() {
           total: Number(item.quantity) * Number(item.unitRate),
         })),
         estimatedAmount,
-        status: 'NEW',
+        status: 'ACCEPTED',
         orderDate: data.orderDate || todayStr(),
         timeSlot: data.timeSlot || 'MORNING',
         ...(data.comment?.trim() ? { comment: data.comment.trim() } : {}),
@@ -429,6 +455,9 @@ export default function OrdersPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
+      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       toast.success('Order converted to bill!')
       setDetailOrder(null)
@@ -468,8 +497,10 @@ export default function OrdersPage() {
 
       if (filterStatus !== 'ALL' && o.status !== filterStatus) return false
 
-      // Use orderDate (user-selected) for filtering, fallback to createdAt
-      const dateStr = o.orderDate || (o.createdAt?.toDate ? o.createdAt.toDate().toISOString().slice(0, 10) : null)
+      // Use orderDate (user-selected) for filtering, fallback to createdAt (IST)
+      const dateStr =
+        o.orderDate ||
+        (o.createdAt?.toDate ? toIstDateString(o.createdAt.toDate()) : null)
       if (dateStr) {
         if (filterDateMode === 'single' && filterSingle) {
           if (dateStr !== filterSingle) return false
@@ -482,7 +513,7 @@ export default function OrdersPage() {
     }).sort((a, b) => {
       const dateA = a.orderDate || ''
       const dateB = b.orderDate || ''
-      if (dateB !== dateA) return dateB.localeCompare(dateA)
+      if (dateA !== dateB) return dateA.localeCompare(dateB)
       return (TIME_SLOT_ORDER[a.timeSlot] ?? 0) - (TIME_SLOT_ORDER[b.timeSlot] ?? 0)
     })
   }, [orders, search, filterStatus, filterDateMode, filterSingle, filterFrom, filterTo])
@@ -616,7 +647,7 @@ export default function OrdersPage() {
                   Order Status
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {([{ value: 'ALL', label: 'All' }, ...ALL_ORDER_STATUSES] as { value: OrderStatus | 'ALL'; label: string }[]).map((opt) => (
+                  {([{ value: 'ALL', label: 'All' }, ...FILTER_ORDER_STATUSES] as { value: OrderStatus | 'ALL'; label: string }[]).map((opt) => (
                     <button
                       key={opt.value}
                       type="button"

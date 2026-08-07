@@ -61,12 +61,14 @@ export default function InvoiceView({ bill }: InvoiceViewProps) {
           </p>
           <span
             className={`inline-block mt-1 px-2 py-0.5 rounded text-xs pd-semibold ${
-              bill.status === 'DONE' || bill.paymentStatus === 'PAID'
-                ? 'pd-success-bg'
-                : 'pd-warn-bg'
+              bill.paymentStatus === 'PAID' ? 'pd-success-bg' : 'pd-warn-bg'
             }`}
           >
-            {bill.status.replace(/_/g, ' ')}
+            {bill.paymentStatus === 'PAID'
+              ? 'Paid'
+              : bill.paymentStatus === 'PARTIAL'
+                ? 'Partial'
+                : 'Unpaid'}
           </span>
         </div>
       </div>

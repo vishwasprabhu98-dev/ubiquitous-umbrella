@@ -19,7 +19,7 @@ export interface LedgerPdfItem {
 export interface LedgerPdfRow {
   date?: Date
   description: string
-  type: 'bill' | 'payment' | 'purchase'
+  type: 'bill' | 'payment' | 'purchase' | 'opening'
   debit: number
   credit: number
   balance: number
@@ -46,6 +46,7 @@ function formatRowDate(date?: Date): string {
 function rowTypeLabel(type: LedgerPdfRow['type']): string {
   if (type === 'bill') return 'Bill'
   if (type === 'purchase') return 'Purchase'
+  if (type === 'opening') return 'Opening'
   return 'Pmt'
 }
 

@@ -54,7 +54,7 @@ export default function LoginPage() {
           <div className="h-14 w-14 rounded-2xl bg-blue-600 flex items-center justify-center mb-4 shadow-lg">
             <ShoppingCart className="h-7 w-7 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">WholesalePro</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Sign in</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Business Management System
           </p>
@@ -134,7 +134,7 @@ export default function LoginPage() {
         </Card>
 
         <p className="text-center text-xs text-gray-500 dark:text-gray-400 mt-6">
-          © 2024 WholesalePro · Secure Business Management
+          © {new Date().getFullYear()} · Secure Business Management
         </p>
       </div>
     </div>
