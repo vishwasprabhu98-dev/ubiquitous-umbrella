@@ -73,7 +73,7 @@ function sanitizeText(value: string): string {
 
 function money(value: number, includeCurrency = true): string {
   if (!includeCurrency) return value.toFixed(1)
-  return `Rs ${value.toFixed(2)}`
+  return `Rs. ${value.toFixed(2)}`
 }
 
 function center(text: string, width = RECEIPT_WIDTH): string {
@@ -139,8 +139,8 @@ export function buildThermalReceiptText(bill: Bill, shopProfile?: ShopProfile | 
   if (shopProfile?.phone) lines.push(center(`Ph: ${shopProfile.phone}`))
   if (shopProfile?.gstNumber) lines.push(center(`GST: ${shopProfile.gstNumber}`))
   lines.push(divider('='))
-  lines.push(pair('Bill No', bill.billNumber))
-  lines.push(pair('Date', billDateLabel(bill)))
+  lines.push(pair('Bill No: ', bill.billNumber))
+  lines.push(pair('Date: ', billDateLabel(bill)))
   lines.push(divider())
   lines.push(...wrapLine(`Customer: ${bill.customerInfo.name}`))
   lines.push(...wrapLine(`Phone: ${bill.customerInfo.phone}`))
@@ -152,7 +152,7 @@ export function buildThermalReceiptText(bill: Bill, shopProfile?: ShopProfile | 
     const rate = Number(item.unitRate) || 0
     const total = qty * rate - (Number(item.itemDiscount) || 0)
 
-    lines.push(...wrapLine(`${index + 1}. ${item.productName}`))
+    lines.push(...wrapLine(`[${index + 1}] ${item.productName}`))
     lines.push(pair(`${qty} x ${money(rate, false)} = `, money(total)))
     if ((item.itemDiscount ?? 0) > 0) {
       lines.push(pair('  Disc', `- ${money(item.itemDiscount)}`))
