@@ -61,22 +61,30 @@ export async function loadLedgerDetail(
 ): Promise<LedgerDetailData> {
   if (entry.isRegistered && entry.customerId) {
     const customerId = entry.customerId
-    const customer = await customerRepository.getById(customerId)
     const monthKey = period?.monthKey
     const bounds = monthKey ? istMonthBounds(monthKey) : null
 
     if (bounds && monthKey) {
-      const [bills, transactions, purchases, broughtForward] = await Promise.all([
+      const [customer, bills, transactions, purchases, broughtForwardRaw] = await Promise.all([
+        customerRepository.getById(customerId),
         billRepository.getByCustomerInRange(customerId, bounds.from, bounds.to),
         safeTransactionsInRange(customerId, bounds.from, bounds.to),
         safePurchasesInRange(customerId, bounds.from, bounds.to),
-        customerBalanceRepository.getBroughtForward(customerId, monthKey),
+        customerBalanceRepository.getBroughtForward(customerId, monthKey, {
+          openingBalance: entry.openingBalance,
+        }),
       ])
 
       const openingBalance = Math.max(0, customer?.openingBalance ?? entry.openingBalance ?? 0)
       const created = toDate(customer?.createdAt)
       const openingMonth = created ? toIstMonthKey(created) : null
       const openingInThisMonth = openingBalance > 0 && openingMonth === monthKey
+
+      // If snapshots were empty, refine opening fallback with the customer we just loaded
+      let broughtForward = broughtForwardRaw
+      if (Math.abs(broughtForward) < 0.001 && openingBalance > 0 && openingMonth && openingMonth < monthKey) {
+        broughtForward = openingBalance
+      }
 
       // Prefer brought-forward from prior months; if opening falls in this month and BF is 0, show Opening.
       let seedAmount = broughtForward
@@ -107,7 +115,8 @@ export async function loadLedgerDetail(
     }
 
     // Full history (share / no period)
-    const [bills, transactions, purchases] = await Promise.all([
+    const [customer, bills, transactions, purchases] = await Promise.all([
+      customerRepository.getById(customerId),
       billRepository.getByCustomer(customerId),
       transactionRepository.getByCustomer(customerId).catch(() => [] as Transaction[]),
       purchaseRepository.getByCustomer(customerId).catch(() => [] as PurchaseInvoice[]),

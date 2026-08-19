@@ -42,6 +42,7 @@ export interface CustomerBalance {
   totalPaid: number
   /** SAVED purchases sourced from this customer (credits) */
   purchaseCredits: number
+  /** Net balance: positive = customer owes, negative = credit (purchase payable) */
   outstanding: number
   billCount: number
   lastActivityAt?: Timestamp

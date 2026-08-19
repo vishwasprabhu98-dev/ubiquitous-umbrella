@@ -338,6 +338,8 @@ function LedgerCard({
   const ledgerBalance = rows[0]?.balance ?? entry.outstanding
   const dueAmount = entry.outstanding
   const hasOutstanding = dueAmount > 0
+  const hasCredit = dueAmount < -0.001
+  const creditAmount = hasCredit ? Math.abs(dueAmount) : 0
 
   const ensureDetail = async () => {
     const cached = queryClient.getQueryData(
@@ -379,9 +381,14 @@ function LedgerCard({
                   Pending
                 </Badge>
               )}
-              {entry.isRegistered && !hasOutstanding && entry.totalBills > 0 && (
+              {entry.isRegistered && !hasOutstanding && !hasCredit && entry.totalBills > 0 && (
                 <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0 text-xs shrink-0">
                   Cleared
+                </Badge>
+              )}
+              {entry.isRegistered && hasCredit && (
+                <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0 text-xs shrink-0">
+                  Credit
                 </Badge>
               )}
             </div>
@@ -410,15 +417,15 @@ function LedgerCard({
                 'text-lg font-bold',
                 dueAmount > 0
                   ? 'text-red-600 dark:text-red-400'
-                  : ledgerBalance < 0
+                  : hasCredit || ledgerBalance < 0
                     ? 'text-green-600 dark:text-green-400'
                     : 'text-gray-500'
               )}
             >
-              ₹{fmt(dueAmount > 0 ? dueAmount : Math.abs(ledgerBalance))}
+              ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
             </div>
             <div className="text-xs text-gray-400">
-              {dueAmount > 0 ? 'outstanding' : ledgerBalance < 0 ? 'credit' : 'cleared'}
+              {dueAmount > 0 ? 'outstanding' : hasCredit || ledgerBalance < 0 ? 'credit' : 'cleared'}
             </div>
           </div>
         </div>
@@ -433,9 +440,9 @@ function LedgerCard({
             <div className="font-semibold text-green-700 dark:text-green-400">₹{fmt(entry.totalPaid)}</div>
           </div>
           <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
-            <div className="text-gray-400 mb-0.5">{ledgerBalance < 0 && dueAmount <= 0 ? 'Credit' : 'Due'}</div>
-            <div className={cn('font-semibold', dueAmount > 0 ? 'text-red-600 dark:text-red-400' : ledgerBalance < 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500')}>
-              ₹{fmt(dueAmount > 0 ? dueAmount : Math.abs(ledgerBalance))}
+            <div className="text-gray-400 mb-0.5">{hasCredit || (ledgerBalance < 0 && dueAmount <= 0) ? 'Credit' : 'Due'}</div>
+            <div className={cn('font-semibold', dueAmount > 0 ? 'text-red-600 dark:text-red-400' : hasCredit || ledgerBalance < 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500')}>
+              ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
             </div>
           </div>
         </div>
@@ -450,6 +457,16 @@ function LedgerCard({
               >
                 <CreditCard className="h-3.5 w-3.5" />
                 Record Payment
+              </button>
+            )}
+            {entry.isRegistered && hasCredit && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onRecordPayment(entry) }}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/40 transition-colors"
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                Pay Credit
               </button>
             )}
             {entry.purchaseId && hasOutstanding && (
@@ -581,10 +598,7 @@ export default function LedgerPage() {
     isFetching: balancesFetching,
   } = useQuery({
     queryKey: ['customerBalances'],
-    queryFn: async () => {
-      const allCustomers = await customerRepository.getAll()
-      return customerBalanceRepository.ensureBuilt(allCustomers)
-    },
+    queryFn: () => customerBalanceRepository.getAll(),
     staleTime: 30_000,
   })
 
@@ -596,6 +610,7 @@ export default function LedgerPage() {
       return billRepository.getByDateRange(bounds.from, bounds.to)
     },
     staleTime: 30_000,
+    enabled: view === 'new',
   })
 
   const { data: rangePurchases = [], isLoading: rangePurchasesLoading } = useQuery({
@@ -606,6 +621,7 @@ export default function LedgerPage() {
       return purchaseRepository.getVendorPurchasesByDateRange(bounds.from, bounds.to)
     },
     staleTime: 30_000,
+    enabled: view === 'vendors',
   })
 
   const { data: shopProfile } = useQuery({
@@ -654,6 +670,47 @@ export default function LedgerPage() {
         return
       }
 
+      // Credit balance: settle by paying against open customer-vendor purchases
+      if (entry.customerId && entry.outstanding < -0.001) {
+        const purchases = await purchaseRepository.getByCustomer(entry.customerId)
+        const open = purchases
+          .filter((p) => p.status === 'SAVED')
+          .map((p) => ({
+            purchase: p,
+            remaining: p.remainingAmount ?? Math.max(0, p.grandTotal - (p.amountPaid ?? 0)),
+          }))
+          .filter((p) => p.remaining > 0.001)
+          .sort((a, b) => {
+            const da = a.purchase.createdAt?.toMillis?.() ?? 0
+            const db = b.purchase.createdAt?.toMillis?.() ?? 0
+            return da - db
+          })
+
+        let left = amount
+        for (const { purchase, remaining } of open) {
+          if (left <= 0.001) break
+          const pay = Math.min(left, remaining)
+          const currentPaid = purchase.amountPaid ?? 0
+          await purchaseRepository.update(purchase.purchaseId, {
+            amountPaid: currentPaid + pay,
+            remainingAmount: Math.max(0, remaining - pay),
+          })
+          await transactionRepository.create({
+            billId: purchase.purchaseId,
+            purchaseId: purchase.purchaseId,
+            customerId: entry.customerId,
+            amount: pay,
+            paymentMode: mode,
+            remarks: remarks || undefined,
+          })
+          left -= pay
+        }
+        if (left > 0.01) {
+          throw new Error(`Could not allocate ₹${fmt(left)} — no open purchase credit left`)
+        }
+        return
+      }
+
       await transactionRepository.create({
         billId: LEDGER_PAYMENT_REF,
         customerId: entry.customerId!,
@@ -665,24 +722,35 @@ export default function LedgerPage() {
     onSuccess: (_, { entry }) => {
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
-      if (entry.purchaseId) {
-        queryClient.invalidateQueries({ queryKey: ['purchases'] })
-        queryClient.invalidateQueries({ queryKey: ['purchases', 'vendors-month'] })
-      }
-      toast.success(entry.purchaseId ? 'Vendor payment recorded' : 'Ledger payment recorded')
+      queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      queryClient.invalidateQueries({ queryKey: ['purchases', 'vendors-month'] })
+      toast.success(
+        entry.purchaseId
+          ? 'Vendor payment recorded'
+          : entry.outstanding < 0
+            ? 'Credit payment recorded'
+            : 'Ledger payment recorded'
+      )
       setPayEntry(null)
       setPayAmount('')
       setPayRemarks('')
     },
-    onError: () => toast.error('Failed to record payment'),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to record payment')
+    },
   })
 
   const handleLedgerPay = () => {
     const amount = Number(payAmount)
     if (!amount || amount <= 0) { toast.error('Enter a valid amount'); return }
     if (!payEntry) return
-    if (amount > payEntry.outstanding + 0.01) {
-      toast.error(`Amount cannot exceed due: ₹${fmt(payEntry.outstanding)}`)
+    const maxDue = Math.abs(payEntry.outstanding)
+    if (amount > maxDue + 0.01) {
+      toast.error(
+        payEntry.outstanding < 0
+          ? `Amount cannot exceed credit: ₹${fmt(maxDue)}`
+          : `Amount cannot exceed due: ₹${fmt(maxDue)}`
+      )
       return
     }
     ledgerPayMutation.mutate({ entry: payEntry, amount, mode: payMode, remarks: payRemarks })
@@ -709,8 +777,8 @@ export default function LedgerPage() {
       const q = search.toLowerCase().trim()
       result = result.filter((e) => matchesLedgerSearch(e, q))
     }
-    if (paymentFilter === 'pending') result = result.filter((e) => e.outstanding > 0)
-    if (paymentFilter === 'paid') result = result.filter((e) => e.outstanding <= 0)
+    if (paymentFilter === 'pending') result = result.filter((e) => e.outstanding !== 0)
+    if (paymentFilter === 'paid') result = result.filter((e) => Math.abs(e.outstanding) < 0.001)
     return result
   }, [ledger, search, paymentFilter])
 
@@ -738,14 +806,21 @@ export default function LedgerPage() {
     [rangedFiltered, page]
   )
 
-  const totalOutstanding = useMemo(() => ledger.reduce((s, e) => s + e.outstanding, 0), [ledger])
+  const totalOutstanding = useMemo(
+    () => ledger.reduce((s, e) => s + Math.max(0, e.outstanding), 0),
+    [ledger]
+  )
   const totalBilled = useMemo(() => ledger.reduce((s, e) => s + e.totalBilled, 0), [ledger])
+  const totalCredit = useMemo(
+    () => ledger.reduce((s, e) => s + (e.outstanding < 0 ? Math.abs(e.outstanding) : 0), 0),
+    [ledger]
+  )
 
   const existingCount = balances.length
   const newCount = rangeBills.filter((b) => !b.customerId || !registeredIds.has(b.customerId)).length
   const vendorsCount = rangePurchases.length
-  const pendingCount = useMemo(() => ledger.filter((e) => e.outstanding > 0).length, [ledger])
-  const paidCount = useMemo(() => ledger.filter((e) => e.outstanding <= 0).length, [ledger])
+  const pendingCount = useMemo(() => ledger.filter((e) => e.outstanding !== 0).length, [ledger])
+  const paidCount = useMemo(() => ledger.filter((e) => Math.abs(e.outstanding) < 0.001).length, [ledger])
 
   const shareRows = useMemo(() => {
     if (!shareLedgerEntry) return []
@@ -869,6 +944,15 @@ export default function LedgerPage() {
                 <div className="font-semibold text-sm text-red-600 dark:text-red-400">₹{fmt(totalOutstanding)}</div>
               </div>
             </div>
+            {totalCredit > 0 && (
+              <div className="flex items-center gap-2 rounded-lg bg-white dark:bg-[#252d3d]/60 border border-gray-200 dark:border-[#2a3040] px-3 py-2">
+                <ArrowUpRight className="h-4 w-4 text-green-500" />
+                <div>
+                  <div className="text-xs text-gray-400">Total Credit</div>
+                  <div className="font-semibold text-sm text-green-600 dark:text-green-400">₹{fmt(totalCredit)}</div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1250,7 +1334,11 @@ export default function LedgerPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BookOpen className="h-4 w-4 text-indigo-500" />
-              {payEntry?.purchaseId ? 'Record Vendor Payment' : 'Record Ledger Payment'}
+              {payEntry?.purchaseId
+                ? 'Record Vendor Payment'
+                : payEntry && payEntry.outstanding < 0
+                  ? 'Pay Credit'
+                  : 'Record Ledger Payment'}
             </DialogTitle>
           </DialogHeader>
           {payEntry && (
@@ -1267,12 +1355,29 @@ export default function LedgerPage() {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-gray-500">{payEntry.purchaseId ? 'Amount Due' : 'Ledger Balance'}</span>
-                  <span className="font-bold text-red-600 dark:text-red-400">
-                    ₹{fmt(payEntry.outstanding)}
+                  <span className="text-gray-500">
+                    {payEntry.purchaseId
+                      ? 'Amount Due'
+                      : payEntry.outstanding < 0
+                        ? 'Credit Balance'
+                        : 'Ledger Balance'}
+                  </span>
+                  <span className={cn(
+                    'font-bold',
+                    payEntry.outstanding < 0
+                      ? 'text-green-600 dark:text-green-400'
+                      : 'text-red-600 dark:text-red-400'
+                  )}>
+                    ₹{fmt(Math.abs(payEntry.outstanding))}
                   </span>
                 </div>
               </div>
+
+              {payEntry.outstanding < 0 && !payEntry.purchaseId && (
+                <p className="text-xs text-gray-500">
+                  This settles open purchase credits for this customer (FIFO).
+                </p>
+              )}
 
               <div className="space-y-1.5">
                 <Label>Payment Amount (₹) *</Label>
@@ -1316,7 +1421,7 @@ export default function LedgerPage() {
             </Button>
             <Button onClick={handleLedgerPay} disabled={ledgerPayMutation.isPending || !payAmount}>
               {ledgerPayMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Record Payment
+              {payEntry && payEntry.outstanding < 0 && !payEntry.purchaseId ? 'Pay Credit' : 'Record Payment'}
             </Button>
           </DialogFooter>
         </DialogContent>

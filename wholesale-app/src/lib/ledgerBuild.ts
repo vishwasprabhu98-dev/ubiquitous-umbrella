@@ -163,6 +163,38 @@ export function buildLedgerRows(
       credit: purchase.grandTotal,
       reference: purchase.purchaseId,
     })
+
+    const purchaseTxs = transactions.filter(
+      (tx) =>
+        tx.purchaseId === purchase.purchaseId ||
+        (tx.billId === purchase.purchaseId && tx.billId !== LEDGER_PAYMENT_REF)
+    )
+    let txPaid = 0
+    for (const tx of purchaseTxs) {
+      txPaid += tx.amount
+      rows.push({
+        id: `purchase-tx-${tx.transactionId}`,
+        date: toDate(tx.createdAt),
+        description: `Paid to vendor${tx.paymentMode ? ` · ${tx.paymentMode.replace('_', ' ')}` : ''}${tx.remarks ? ` — ${tx.remarks}` : ''}`,
+        type: 'payment',
+        debit: tx.amount,
+        credit: 0,
+        reference: tx.transactionId,
+        paymentMode: tx.paymentMode,
+      })
+    }
+    const unrecordedPaid = (purchase.amountPaid ?? 0) - txPaid
+    if (unrecordedPaid > 0.001) {
+      rows.push({
+        id: `purchase-paid-${purchase.purchaseId}`,
+        date: toDate(purchase.createdAt),
+        description: 'Paid to vendor',
+        type: 'payment',
+        debit: unrecordedPaid,
+        credit: 0,
+        reference: purchase.purchaseId,
+      })
+    }
   }
 
   rows.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0))
@@ -318,7 +350,7 @@ export function buildExistingLedgerFromBalances(
     const inRange =
       !activityMonthKey
         ? true
-        : balance.outstanding > 0 || lastMonth === activityMonthKey
+        : balance.outstanding !== 0 || lastMonth === activityMonthKey
 
     if (!inRange) continue
 
@@ -364,7 +396,7 @@ export function buildExistingLedgerFromBalances(
     })
   }
 
-  return entries.sort((a, b) => b.outstanding - a.outstanding)
+  return entries.sort((a, b) => Math.abs(b.outstanding) - Math.abs(a.outstanding))
 }
 
 export function buildNewCustomerLedger(

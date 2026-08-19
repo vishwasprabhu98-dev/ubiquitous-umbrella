@@ -15,7 +15,7 @@ import {
 import { db } from '@/firebase/config'
 import { COLLECTIONS } from '@/firebase/collections'
 import { sanitizeFirestoreData } from '@/lib/firestoreUtils'
-import { getBillDateString, istDayStart, previousMonthKey, toIstMonthKey } from '@/lib/istDate'
+import { getBillDateString, istDayStart, toIstMonthKey } from '@/lib/istDate'
 import { LEDGER_PAYMENT_REF } from './customerBalanceRepository.constants'
 import type { Bill, Customer, CustomerBalance, CustomerMonthlySnapshot, PurchaseInvoice, Transaction } from '@/types'
 
@@ -86,11 +86,17 @@ function computeBalance(
   const ledgerPaid = transactions
     .filter((tx) => tx.billId === LEDGER_PAYMENT_REF)
     .reduce((s, tx) => s + tx.amount, 0)
-  const purchaseCredits = savedPurchases.reduce((s, p) => s + (p.grandTotal ?? 0), 0)
+  /** Unpaid purchase remainder = credit we still owe the customer-vendor */
+  const purchaseCredits = savedPurchases.reduce((s, p) => {
+    const remaining =
+      p.remainingAmount ?? Math.max(0, (p.grandTotal ?? 0) - (p.amountPaid ?? 0))
+    return s + remaining
+  }, 0)
 
   const totalBilled = billsTotal + openingBalance
   const totalPaid = billLevelPaid + ledgerPaid
-  const outstanding = Math.max(0, openingBalance + billsTotal - totalPaid - purchaseCredits)
+  // Negative outstanding = credit balance (we owe them / they have credit)
+  const outstanding = openingBalance + billsTotal - totalPaid - purchaseCredits
 
   const activityTimes: number[] = []
   const created = toDate(customer.createdAt)
@@ -170,10 +176,27 @@ function computeMonthlyClosings(
 
   for (const purchase of purchases) {
     if (purchase.status !== 'SAVED') continue
+    if (!(purchase.vendorType === 'customer' || purchase.customerId)) continue
     events.push({
       date: toDate(purchase.createdAt) ?? new Date(0),
       delta: -purchase.grandTotal,
     })
+  }
+
+  // Payments we made against customer-vendor purchases (settle credit)
+  const purchaseIds = new Set(
+    purchases.filter((p) => p.status === 'SAVED' && (p.vendorType === 'customer' || p.customerId)).map((p) => p.purchaseId)
+  )
+  for (const tx of transactions) {
+    if (tx.purchaseId && purchaseIds.has(tx.purchaseId)) {
+      events.push({ date: toDate(tx.createdAt) ?? new Date(0), delta: tx.amount })
+    } else if (
+      !tx.purchaseId &&
+      purchaseIds.has(tx.billId) &&
+      tx.billId !== LEDGER_PAYMENT_REF
+    ) {
+      events.push({ date: toDate(tx.createdAt) ?? new Date(0), delta: tx.amount })
+    }
   }
 
   events.sort((a, b) => a.date.getTime() - b.date.getTime())
@@ -264,26 +287,42 @@ export const customerBalanceRepository = {
   },
 
   /**
-   * Balance brought into `monthKey` = previous month's closing snapshot.
-   * Walks back up to 36 months; falls back to customer openingBalance if dated before this month.
+   * Balance brought into `monthKey` = latest prior month's closing snapshot.
+   * One subcollection read (doc ids are YYYY-MM).
+   * When `openingHint` is provided, uses it for opening-balance fallback (no extra customer read).
    */
-  async getBroughtForward(customerId: string, monthKey: string): Promise<number> {
-    let cursor = previousMonthKey(monthKey)
-    for (let i = 0; i < 36 && cursor; i++) {
-      const snap = await this.getMonthlySnapshot(customerId, cursor)
-      if (snap) return snap.closingBalance
-      cursor = previousMonthKey(cursor)
+  async getBroughtForward(
+    customerId: string,
+    monthKey: string,
+    openingHint?: { openingBalance?: number; createdAt?: unknown }
+  ): Promise<number> {
+    const all = await getDocs(snapshotsRef(customerId))
+    let bestKey = ''
+    let bestBal = 0
+    for (const d of all.docs) {
+      if (d.id < monthKey && d.id > bestKey) {
+        bestKey = d.id
+        bestBal = (d.data() as CustomerMonthlySnapshot).closingBalance
+      }
+    }
+    if (bestKey) return bestBal
+
+    const resolveOpening = (openingBalance: number | undefined, createdAt: unknown) => {
+      const ob = Math.max(0, openingBalance ?? 0)
+      if (ob <= 0) return 0
+      const created = toDate(createdAt)
+      if (!created) return ob
+      return toIstMonthKey(created) < monthKey ? ob : 0
+    }
+
+    if (openingHint) {
+      return resolveOpening(openingHint.openingBalance, openingHint.createdAt)
     }
 
     const customerSnap = await getDoc(doc(db, COLLECTIONS.CUSTOMERS, customerId))
     if (!customerSnap.exists()) return 0
     const customer = { ...customerSnap.data(), customerId } as Customer
-    const ob = Math.max(0, customer.openingBalance ?? 0)
-    if (ob <= 0) return 0
-    const created = toDate(customer.createdAt)
-    if (!created) return ob
-    const obMonth = toIstMonthKey(created)
-    return obMonth < monthKey ? ob : 0
+    return resolveOpening(customer.openingBalance, customer.createdAt)
   },
 
   /** Recompute and upsert balance + monthly snapshots for one customer. */
@@ -348,35 +387,11 @@ export const customerBalanceRepository = {
     return count
   },
 
-  async ensureBuilt(customers: Customer[]): Promise<CustomerBalance[]> {
-    let balances = await this.getAll()
-    const balanceIds = new Set(balances.map((b) => b.customerId))
-    const missing = customers.filter((c) => {
-      if (balanceIds.has(c.customerId)) return false
-      return (c.openingBalance ?? 0) > 0
-    })
-
-    const metaRef = doc(db, COLLECTIONS.SETTINGS, 'customerBalancesMeta')
-    const metaSnap = await getDoc(metaRef)
-    const migrated = metaSnap.exists() && metaSnap.data()?.migrated === true
-
-    if (!migrated) {
-      await this.rebuildAll()
-      await setDoc(
-        metaRef,
-        { migrated: true, migratedAt: serverTimestamp() },
-        { merge: true }
-      )
-      return this.getAll()
-    }
-
-    for (const c of missing) {
-      await this.refresh(c.customerId)
-    }
-
-    if (missing.length > 0) {
-      balances = await this.getAll()
-    }
-    return balances
+  /**
+   * Fast list path: only read denormalized balances.
+   * Rebuild/migration is explicit via rebuildAll() — never block page open.
+   */
+  async ensureBuilt(_customers?: Customer[]): Promise<CustomerBalance[]> {
+    return this.getAll()
   },
 }

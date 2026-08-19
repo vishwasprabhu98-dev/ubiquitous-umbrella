@@ -570,13 +570,12 @@ export default function PurchasePage() {
                       setVendorSearch(e.target.value)
                       clearErrors(['vendorName', 'vendorPhone'])
                     }}
-                    disabled={editingPurchase?.status === 'SAVED'}
                   />
                   {errors.vendorName && watchVendorType === 'customer' && (
                     <p className="text-xs text-red-500">{errors.vendorName.message}</p>
                   )}
                 </div>
-                {vendorSearch && filteredCustomers.length > 0 && !watchCustomerId && editingPurchase?.status !== 'SAVED' && (
+                {vendorSearch && filteredCustomers.length > 0 && !watchCustomerId && (
                   <div className="border rounded-lg overflow-hidden max-h-40 overflow-y-auto">
                     {filteredCustomers.slice(0, 8).map((c) => (
                       <button
@@ -593,8 +592,28 @@ export default function PurchasePage() {
                 )}
                 {watchCustomerId && (
                   <div className="rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 p-3 text-sm">
-                    <p className="font-medium text-green-800 dark:text-green-200">{watch('vendorName')}</p>
-                    <p className="text-green-600 dark:text-green-400">{watch('vendorPhone')}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-green-800 dark:text-green-200">{watch('vendorName')}</p>
+                        <p className="text-green-600 dark:text-green-400">{watch('vendorPhone')}</p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-green-700 hover:text-green-900 dark:text-green-300"
+                        onClick={() => {
+                          setValue('customerId', '')
+                          setValue('vendorName', '')
+                          setValue('vendorPhone', '')
+                          setValue('vendorGst', '')
+                          setVendorSearch('')
+                          clearErrors(['vendorName', 'vendorPhone'])
+                        }}
+                      >
+                        Change
+                      </Button>
+                    </div>
                   </div>
                 )}
               </TabsContent>
@@ -605,7 +624,6 @@ export default function PurchasePage() {
                     <Label>Vendor Name *</Label>
                     <Input
                       {...register('vendorName', { required: 'Vendor name is required' })}
-                      disabled={editingPurchase?.status === 'SAVED'}
                     />
                     {errors.vendorName && <p className="text-xs text-red-500">{errors.vendorName.message}</p>}
                   </div>
@@ -616,13 +634,12 @@ export default function PurchasePage() {
                         required: 'Phone is required',
                         validate: (v) => v.replace(/\D/g, '').length >= 10 || 'Min 10 digits',
                       })}
-                      disabled={editingPurchase?.status === 'SAVED'}
                     />
                     {errors.vendorPhone && <p className="text-xs text-red-500">{errors.vendorPhone.message}</p>}
                   </div>
                   <div className="space-y-1.5">
                     <Label>GST Number</Label>
-                    <Input {...register('vendorGst')} disabled={editingPurchase?.status === 'SAVED'} />
+                    <Input {...register('vendorGst')} />
                   </div>
                 </div>
               </TabsContent>

@@ -19,6 +19,7 @@ import {
   BookOpen,
   Undo2,
   Share2,
+  Printer,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { todayIst, addIstDays, istMonthRange, getBillDateString, istDayStart } from '@/lib/istDate'
@@ -46,6 +47,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { sharePdfBlob, downloadPdfBlob } from '@/lib/sharePdf'
 import { createBillPdfBlob } from '@/lib/billPdf'
+import { printBillToBlePrinter } from '@/lib/thermalPrinter'
 import type { Bill, BillStatus, PaymentMode, PaymentStatus } from '@/types'
 import InvoiceView from './InvoiceView'
 
@@ -237,6 +239,7 @@ export default function BillingPage() {
   const [search, setSearch] = useState('')
   const [viewBill, setViewBill] = useState<Bill | null>(null)
   const [sharingPdf, setSharingPdf] = useState(false)
+  const [printingReceipt, setPrintingReceipt] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
   const [editingBill, setEditingBill] = useState<Bill | null>(null)
@@ -1505,6 +1508,29 @@ export default function BillingPage() {
             <DialogFooter className="print:hidden">
               <Button
                 variant="outline"
+                disabled={printingReceipt || sharingPdf || shopProfileLoading}
+                title={shopProfileLoading ? 'Loading invoice…' : 'Print to 58mm BLE thermal printer'}
+                onClick={async () => {
+                  setPrintingReceipt(true)
+                  try {
+                    await printBillToBlePrinter(viewBill, shopProfile)
+                    toast.success('Receipt sent to printer')
+                  } catch (err) {
+                    if (err instanceof Error && err.name === 'NotFoundError') {
+                      toast.info('Printer selection was cancelled')
+                    } else {
+                      toast.error(err instanceof Error ? err.message : 'Failed to print receipt')
+                    }
+                  } finally {
+                    setPrintingReceipt(false)
+                  }
+                }}
+              >
+                {printingReceipt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                Print 58mm
+              </Button>
+              <Button
+                variant="outline"
                 disabled={sharingPdf || shopProfileLoading}
                 title={shopProfileLoading ? 'Loading invoice…' : undefined}
                 onClick={async () => {
@@ -1514,7 +1540,7 @@ export default function BillingPage() {
                     await sharePdfBlob({
                       blob,
                       filename: `invoice-${viewBill.billNumber}.pdf`,
-                      title: `Invoice ${viewBill.billNumber}`,
+                      title: `Invoice ${viewBill.billNumber} \n\n vishwas`,
                       onFallback: (msg) => toast.info(msg),
                     })
                   } catch (err) {
