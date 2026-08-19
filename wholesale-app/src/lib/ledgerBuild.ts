@@ -27,6 +27,7 @@ export interface CustomerLedgerEntry {
   totalPaid: number
   outstanding: number
   openingBalance?: number
+  customerCreatedAt?: Date
   lastBillDate?: Date
   bills: Bill[]
   purchases?: PurchaseInvoice[]
@@ -209,6 +210,22 @@ export function buildLedgerRows(
   return withBalance.reverse()
 }
 
+/** Sum in-period billed/paid and closing balance from newest-first ledger rows. */
+export function periodMetricsFromRows(rows: LedgerRow[]): {
+  billed: number
+  paid: number
+  closing: number
+} {
+  let billed = 0
+  let paid = 0
+  for (const row of rows) {
+    if (row.type === 'bill') billed += row.debit
+    if (row.type === 'payment') paid += row.credit
+    if (row.type === 'purchase') paid += row.credit
+  }
+  return { billed, paid, closing: rows[0]?.balance ?? 0 }
+}
+
 export function buildVendorPurchaseRows(
   purchase: PurchaseInvoice,
   transactions: Transaction[]
@@ -365,6 +382,7 @@ export function buildExistingLedgerFromBalances(
       totalPaid: balance.totalPaid,
       outstanding: balance.outstanding,
       openingBalance: balance.openingBalance,
+      customerCreatedAt: toDate(customer.createdAt),
       lastBillDate: lastActivity,
       bills: [],
       ledgerRows: [],
@@ -390,6 +408,7 @@ export function buildExistingLedgerFromBalances(
       totalPaid: 0,
       outstanding: ob,
       openingBalance: ob,
+      customerCreatedAt: created,
       lastBillDate: created,
       bills: [],
       ledgerRows: [],

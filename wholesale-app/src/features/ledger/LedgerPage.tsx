@@ -55,6 +55,7 @@ import {
   buildNewCustomerLedger,
   buildVendorLedger,
   matchesLedgerSearch,
+  periodMetricsFromRows,
   type CustomerLedgerEntry,
   type LedgerRow,
 } from '@/lib/ledgerBuild'
@@ -353,9 +354,13 @@ function LedgerCard({
   })
 
   const rows = detail?.ledgerRows ?? entry.ledgerRows
-  // Card outstanding stays all-time; period table uses newest-first rows → [0]
-  const ledgerBalance = rows[0]?.balance ?? entry.outstanding
-  const dueAmount = entry.outstanding
+  const usePeriodMetrics = Boolean(monthKey && detail && entry.isRegistered)
+  const periodMetrics = usePeriodMetrics ? periodMetricsFromRows(rows) : null
+
+  const billedAmount = periodMetrics?.billed ?? entry.totalBilled
+  const paidAmount = periodMetrics?.paid ?? entry.totalPaid
+  const ledgerBalance = periodMetrics?.closing ?? rows[0]?.balance ?? entry.outstanding
+  const dueAmount = usePeriodMetrics ? ledgerBalance : entry.outstanding
   const hasOutstanding = dueAmount > 0
   const hasCredit = dueAmount < -0.001
   const creditAmount = hasCredit ? Math.abs(dueAmount) : 0
@@ -452,11 +457,11 @@ function LedgerCard({
         <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
           <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
             <div className="text-gray-400 mb-0.5">Billed</div>
-            <div className="font-semibold text-gray-800 dark:text-gray-200">₹{fmt(entry.totalBilled)}</div>
+            <div className="font-semibold text-gray-800 dark:text-gray-200">₹{fmt(billedAmount)}</div>
           </div>
           <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
             <div className="text-gray-400 mb-0.5">Paid</div>
-            <div className="font-semibold text-green-700 dark:text-green-400">₹{fmt(entry.totalPaid)}</div>
+            <div className="font-semibold text-green-700 dark:text-green-400">₹{fmt(paidAmount)}</div>
           </div>
           <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
             <div className="text-gray-400 mb-0.5">{hasCredit || (ledgerBalance < 0 && dueAmount <= 0) ? 'Excess' : 'Due'}</div>

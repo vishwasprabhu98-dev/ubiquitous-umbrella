@@ -311,9 +311,27 @@ export const customerBalanceRepository = {
       const ob = Math.max(0, openingBalance ?? 0)
       if (ob <= 0) return 0
       const created = toDate(createdAt)
-      if (!created) return ob
+      if (!created) return 0
       return toIstMonthKey(created) < monthKey ? ob : 0
     }
+
+    const computeFromHistory = async (): Promise<number | null> => {
+      const customerSnap = await getDoc(doc(db, COLLECTIONS.CUSTOMERS, customerId))
+      if (!customerSnap.exists()) return null
+      const customer = { ...customerSnap.data(), customerId } as Customer
+      const [bills, transactions, purchases] = await Promise.all([
+        fetchCustomerBills(customerId),
+        fetchCustomerTransactions(customerId),
+        fetchCustomerPurchases(customerId),
+      ])
+      const closings = computeMonthlyClosings(customer, bills, transactions, purchases)
+      const priorKeys = [...closings.keys()].filter((k) => k < monthKey).sort()
+      if (priorKeys.length === 0) return null
+      return closings.get(priorKeys[priorKeys.length - 1]) ?? 0
+    }
+
+    const fromHistory = await computeFromHistory()
+    if (fromHistory != null) return fromHistory
 
     if (openingHint) {
       return resolveOpening(openingHint.openingBalance, openingHint.createdAt)
