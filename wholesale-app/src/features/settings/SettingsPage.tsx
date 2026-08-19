@@ -4,8 +4,9 @@ import ProductManagement from './ProductManagement'
 import PricingManagement from './PricingManagement'
 import NumberFormatSettings from './NumberFormatSettings'
 import ShopProfileSettings from './ShopProfileSettings'
+import LedgerMaintenanceSettings from './LedgerMaintenanceSettings'
 import UserManagement from './UserManagement'
-import { Users, Package, Tags, Hash, Store, ShieldCheck } from 'lucide-react'
+import { Users, Package, Tags, Hash, Store, ShieldCheck, RefreshCw } from 'lucide-react'
 
 export default function SettingsPage() {
   return (
@@ -13,12 +14,12 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
         <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-          Manage shop profile, users, customers, products, pricing and number formats
+          Manage shop profile, users, customers, products, pricing, number formats, and ledger maintenance
         </p>
       </div>
 
       <Tabs defaultValue="shop">
-        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 lg:w-auto lg:inline-grid">
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-7 lg:w-auto lg:inline-grid">
           <TabsTrigger value="shop" className="flex items-center gap-2">
             <Store className="h-4 w-4" />
             <span className="hidden sm:inline">Shop Profile</span>
@@ -43,6 +44,10 @@ export default function SettingsPage() {
             <Hash className="h-4 w-4" />
             <span className="hidden sm:inline">Number Format</span>
           </TabsTrigger>
+          <TabsTrigger value="ledger" className="flex items-center gap-2">
+            <RefreshCw className="h-4 w-4" />
+            <span className="hidden sm:inline">Ledger</span>
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="shop" className="mt-6">
           <ShopProfileSettings />
@@ -61,6 +66,9 @@ export default function SettingsPage() {
         </TabsContent>
         <TabsContent value="numberformat" className="mt-6">
           <NumberFormatSettings />
+        </TabsContent>
+        <TabsContent value="ledger" className="mt-6">
+          <LedgerMaintenanceSettings />
         </TabsContent>
       </Tabs>
     </div>

@@ -19,6 +19,8 @@ import {
   Share2,
   Edit2,
   Download,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { toast } from 'sonner'
@@ -27,6 +29,7 @@ import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { productRepository } from '@/firebase/repositories/productRepository'
 import { pricingRepository } from '@/firebase/repositories/pricingRepository'
 import { billRepository } from '@/firebase/repositories/billRepository'
+import { transactionRepository } from '@/firebase/repositories/transactionRepository'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
 import { todayIst, toIstDateString, addIstDays, istMonthRange } from '@/lib/istDate'
 import { Button } from '@/components/ui/button'
@@ -42,7 +45,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { sharePdfBlob, downloadPdfBlob } from '@/lib/sharePdf'
 import { createOrderPdfBlob } from '@/lib/orderPdf'
 import OrderView from './OrderView'
-import type { Order, OrderStatus, TimeSlot } from '@/types'
+import type { Order, OrderStatus, PaymentMode, PaymentStatus, TimeSlot } from '@/types'
 
 // ─── Time slot config ────────────────────────────────────────────────────────
 
@@ -88,6 +91,14 @@ const FILTER_ORDER_STATUSES: { value: OrderStatus; label: string }[] = [
   { value: 'ACCEPTED', label: 'Accepted' },
   { value: 'DELIVERED', label: 'Delivered' },
   { value: 'REJECTED', label: 'Rejected' },
+]
+
+const PAYMENT_MODES: { value: PaymentMode; label: string }[] = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'UPI', label: 'UPI' },
+  { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
+  { value: 'CHEQUE', label: 'Cheque' },
+  { value: 'OTHER', label: 'Other' },
 ]
 
 // ─── Date helpers ────────────────────────────────────────────────────────────
@@ -136,6 +147,9 @@ interface OrderFormData {
   orderDate: string
   timeSlot: TimeSlot
   comment?: string
+  advanceAmount: number
+  advanceMode: PaymentMode
+  advanceRemarks?: string
   items: {
     productId: string
     productName: string
@@ -143,6 +157,27 @@ interface OrderFormData {
     unitRate: number
     total: number
   }[]
+}
+
+function formatOrderItemsSummary(items: Order['items']): string {
+  const visible = items.slice(0, 3).map((item) => {
+    const shortName = item.productName.trim().slice(0, 3).toLowerCase()
+    return `${item.quantity} ${shortName || 'itm'}`
+  })
+  const hiddenCount = Math.max(0, items.length - visible.length)
+  return hiddenCount > 0 ? `${visible.join(', ')} +${hiddenCount} more` : visible.join(', ')
+}
+
+function paymentStatusFromAmounts(total: number, amountPaid: number): PaymentStatus {
+  if (amountPaid >= total - 0.01) return 'PAID'
+  if (amountPaid > 0.01) return 'PARTIAL'
+  return 'UNPAID'
+}
+
+function billStatusFromPayment(paymentStatus: PaymentStatus): 'PENDING' | 'PARTIAL_PAYMENT' | 'DONE' {
+  if (paymentStatus === 'PAID') return 'DONE'
+  if (paymentStatus === 'PARTIAL') return 'PARTIAL_PAYMENT'
+  return 'PENDING'
 }
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
@@ -158,6 +193,7 @@ export default function OrdersPage() {
   const [deliverConvertPrompt, setDeliverConvertPrompt] = useState<Order | null>(null)
   const [sharingPdf, setSharingPdf] = useState(false)
   const [customerSearch, setCustomerSearch] = useState('')
+  const [advanceOpen, setAdvanceOpen] = useState(false)
 
   // Filter state — default: last 7 days + next 7 days
   const [showFilters, setShowFilters] = useState(false)
@@ -203,6 +239,9 @@ export default function OrdersPage() {
       orderDate: todayStr(),
       timeSlot: 'MORNING' as TimeSlot,
       comment: '',
+      advanceAmount: 0,
+      advanceMode: 'CASH',
+      advanceRemarks: '',
       items: [{ productId: '', productName: '', quantity: 1, unitRate: 0, total: 0 }],
     },
   })
@@ -211,6 +250,7 @@ export default function OrdersPage() {
   const watchItems = watch('items')
   const watchCustomerType = watch('customerType')
   const watchCustomerId = watch('customerId')
+  const watchAdvanceAmount = watch('advanceAmount') ?? 0
 
   const estimatedAmount = watchItems.reduce((sum, item) => {
     const qty = Number(item.quantity) || 0
@@ -279,7 +319,19 @@ export default function OrdersPage() {
       return
     }
 
-    const payload: OrderFormData = { ...data, customerName, customerPhone }
+    const advanceAmount = Math.max(0, Number(data.advanceAmount) || 0)
+    if (advanceAmount > estimatedAmount + 0.01) {
+      toast.error('Advance payment cannot exceed the estimated total')
+      return
+    }
+
+    const payload: OrderFormData = {
+      ...data,
+      customerName,
+      customerPhone,
+      advanceAmount,
+      advanceRemarks: data.advanceRemarks?.trim() ?? '',
+    }
 
     if (editOrder) {
       await updateMutation.mutateAsync({ orderId: editOrder.orderId, data: payload })
@@ -292,11 +344,15 @@ export default function OrdersPage() {
     setCreateOpen(false)
     setEditOrder(null)
     setCustomerSearch('')
+    setAdvanceOpen(false)
     reset({
       customerType: 'existing',
       orderDate: todayStr(),
       timeSlot: 'MORNING',
       comment: '',
+      advanceAmount: 0,
+      advanceMode: 'CASH',
+      advanceRemarks: '',
       items: [{ productId: '', productName: '', quantity: 1, unitRate: 0, total: 0 }],
     })
   }
@@ -304,6 +360,7 @@ export default function OrdersPage() {
   const openEdit = (order: Order) => {
     setDetailOrder(null)
     setEditOrder(order)
+    setAdvanceOpen((order.advanceAmount ?? 0) > 0 || !!order.advanceRemarks)
     const isRegistered = !!order.customerId
     reset({
       customerType: isRegistered ? 'existing' : 'new',
@@ -314,6 +371,9 @@ export default function OrdersPage() {
       orderDate: order.orderDate || todayStr(),
       timeSlot: order.timeSlot || 'MORNING',
       comment: order.comment ?? '',
+      advanceAmount: order.advanceAmount ?? 0,
+      advanceMode: order.advanceMode ?? 'CASH',
+      advanceRemarks: order.advanceRemarks ?? '',
       items: order.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
@@ -376,6 +436,9 @@ export default function OrdersPage() {
           total: Number(item.quantity) * Number(item.unitRate),
         })),
         estimatedAmount,
+        advanceAmount: Math.max(0, Number(data.advanceAmount) || 0),
+        advanceMode: data.advanceMode,
+        ...(data.advanceRemarks?.trim() ? { advanceRemarks: data.advanceRemarks.trim() } : {}),
         status: 'ACCEPTED',
         orderDate: data.orderDate || todayStr(),
         timeSlot: data.timeSlot || 'MORNING',
@@ -431,6 +494,9 @@ export default function OrdersPage() {
           total: Number(item.quantity) * Number(item.unitRate),
         })),
         estimatedAmount,
+        advanceAmount: Math.max(0, Number(data.advanceAmount) || 0),
+        advanceMode: data.advanceMode,
+        advanceRemarks: data.advanceRemarks?.trim() ?? '',
         orderDate: data.orderDate || todayStr(),
         timeSlot: data.timeSlot || 'MORNING',
         comment: data.comment?.trim() ?? '',
@@ -445,9 +511,13 @@ export default function OrdersPage() {
   })
 
   const convertToBillMutation = useMutation({
-    mutationFn: async (order: Order) => {
+    mutationFn: async ({ order, markPaid }: { order: Order; markPaid: boolean }) => {
       const billNumber = await billRepository.generateBillNumber()
       const subtotal = order.items.reduce((s, i) => s + i.quantity * i.unitRate, 0)
+      const orderAdvance = Math.min(Math.max(0, order.advanceAmount ?? 0), subtotal)
+      const amountPaid = markPaid ? subtotal : orderAdvance
+      const remainingAmount = Math.max(0, subtotal - amountPaid)
+      const paymentStatus = paymentStatusFromAmounts(subtotal, amountPaid)
       const createdBill = await billRepository.create({
         billNumber,
         ...(order.customerId ? { customerId: order.customerId } : {}),
@@ -458,22 +528,34 @@ export default function OrdersPage() {
         gstAmount: 0,
         grandTotal: subtotal,
         isGstBill: false,
-        status: 'PENDING',
-        amountPaid: 0,
-        remainingAmount: subtotal,
-        paymentStatus: 'UNPAID',
+        status: billStatusFromPayment(paymentStatus),
+        amountPaid,
+        remainingAmount,
+        paymentStatus,
         billingDate: todayIst(),
       })
+      if (order.customerId && amountPaid > 0.01) {
+        const autoRemarks = markPaid
+          ? `Paid while converting order ${order.orderNumber} to bill`
+          : `Order advance adjusted from ${order.orderNumber}`
+        await transactionRepository.create({
+          billId: createdBill.billId,
+          customerId: order.customerId,
+          amount: amountPaid,
+          paymentMode: order.advanceMode ?? 'CASH',
+          remarks: order.advanceRemarks?.trim() || autoRemarks,
+        })
+      }
       // Mark the order as converted so it cannot be converted again
       await orderRepository.update(order.orderId, { billId: createdBill.billId })
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
-      toast.success('Order converted to bill!')
+      toast.success(vars.markPaid ? 'Order converted to paid bill!' : 'Order converted to bill!')
       setDetailOrder(null)
       setDeliverConvertPrompt(null)
     },
@@ -752,8 +834,16 @@ export default function OrdersPage() {
                           </span>
                         )}
                       </div>
+                      <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                        {formatOrderItemsSummary(order.items)}
+                      </p>
                       {order.comment && (
                         <p className="text-xs text-gray-400 italic mt-0.5 line-clamp-1">{order.comment}</p>
+                      )}
+                      {(order.advanceAmount ?? 0) > 0 && (
+                        <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
+                          Advance: {formatCurrency(order.advanceAmount ?? 0)}
+                        </p>
                       )}
                     </div>
                     <div className="text-right shrink-0">
@@ -963,6 +1053,60 @@ export default function OrdersPage() {
                 placeholder="Optional note about this order…"
                 className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
               />
+            </div>
+
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setAdvanceOpen((prev) => !prev)}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
+              >
+                <div>
+                  <Label className="text-sm font-semibold cursor-pointer">Advance Payment</Label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {watchAdvanceAmount > 0
+                      ? `${formatCurrency(Number(watchAdvanceAmount) || 0)} added`
+                      : 'Optional. Adjusted automatically when converted to a bill.'}
+                  </p>
+                </div>
+                {advanceOpen ? (
+                  <ChevronUp className="h-4 w-4 text-gray-400 shrink-0" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
+                )}
+              </button>
+
+              {advanceOpen && (
+                <div className="border-t border-gray-200 dark:border-gray-800 p-4 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label>Advance Amount (₹)</Label>
+                      <Controller
+                        control={control}
+                        name="advanceAmount"
+                        render={({ field }) => (
+                          <NumericInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} />
+                        )}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Payment Mode</Label>
+                      <select
+                        {...register('advanceMode')}
+                        className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {PAYMENT_MODES.map((mode) => (
+                          <option key={mode.value} value={mode.value}>{mode.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Advance Remarks</Label>
+                    <Input {...register('advanceRemarks')} placeholder="Optional payment note" />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Items section */}
@@ -1207,19 +1351,35 @@ export default function OrdersPage() {
               )}
 
               {detailOrder.status !== 'REJECTED' && (
-                <Button
-                  size="sm"
-                  onClick={() => convertToBillMutation.mutate(detailOrder)}
-                  disabled={convertToBillMutation.isPending || !!detailOrder.billId}
-                  title={detailOrder.billId ? `Already converted to bill ${detailOrder.billId}` : undefined}
-                >
-                  {convertToBillMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ArrowRight className="h-4 w-4" />
-                  )}
-                  {detailOrder.billId ? 'Already Billed' : 'Convert to Bill'}
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => convertToBillMutation.mutate({ order: detailOrder, markPaid: false })}
+                    disabled={convertToBillMutation.isPending || !!detailOrder.billId}
+                    title={detailOrder.billId ? `Already converted to bill ${detailOrder.billId}` : undefined}
+                  >
+                    {convertToBillMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4" />
+                    )}
+                    {detailOrder.billId ? 'Already Billed' : 'Convert to Bill'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => convertToBillMutation.mutate({ order: detailOrder, markPaid: true })}
+                    disabled={convertToBillMutation.isPending || !!detailOrder.billId}
+                    title={detailOrder.billId ? `Already converted to bill ${detailOrder.billId}` : undefined}
+                  >
+                    {convertToBillMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Receipt className="h-4 w-4" />
+                    )}
+                    Convert to Paid Bill
+                  </Button>
+                </>
               )}
 
               <Button
@@ -1288,16 +1448,26 @@ export default function OrdersPage() {
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeliverConvertPrompt(null)} disabled={convertToBillMutation.isPending}>
-              Not now
+              Cancel
             </Button>
             <Button
+              variant="outline"
               onClick={() => {
-                if (deliverConvertPrompt) convertToBillMutation.mutate(deliverConvertPrompt)
+                if (deliverConvertPrompt) convertToBillMutation.mutate({ order: deliverConvertPrompt, markPaid: false })
               }}
               disabled={convertToBillMutation.isPending}
             >
               {convertToBillMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Convert to Bill
+            </Button>
+            <Button
+              onClick={() => {
+                if (deliverConvertPrompt) convertToBillMutation.mutate({ order: deliverConvertPrompt, markPaid: true })
+              }}
+              disabled={convertToBillMutation.isPending}
+            >
+              {convertToBillMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Convert to Paid Bill
             </Button>
           </DialogFooter>
         </DialogContent>

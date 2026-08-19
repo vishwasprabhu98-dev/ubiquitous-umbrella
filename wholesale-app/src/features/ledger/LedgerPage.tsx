@@ -25,7 +25,6 @@ import {
   Share2,
   ShoppingBag,
   Download,
-  RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -87,7 +86,7 @@ const PAGE_SIZE = 10
 const RANGE_PAGE_SIZE = 100
 
 type LedgerView = 'existing' | 'new' | 'vendors'
-type PaymentFilter = 'all' | 'pending' | 'paid'
+type PaymentFilter = 'all' | 'pending' | 'paid' | 'credit'
 
 function fmt(amount: number) {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(amount)
@@ -99,6 +98,26 @@ function formatDate(date?: Date) {
     return format(date, 'dd MMM yyyy')
   } catch {
     return '—'
+  }
+}
+
+function purchaseEntryFromInvoice(purchase: PurchaseInvoice): CustomerLedgerEntry {
+  const outstanding = purchase.remainingAmount ?? Math.max(0, purchase.grandTotal - (purchase.amountPaid ?? 0))
+  return {
+    key: purchase.purchaseId,
+    purchaseId: purchase.purchaseId,
+    name: purchase.vendorInfo.name,
+    phone: purchase.vendorInfo.phone || '—',
+    billNumber: purchase.purchaseNumber,
+    isRegistered: false,
+    totalBills: 1,
+    totalBilled: purchase.grandTotal,
+    totalPaid: purchase.amountPaid ?? 0,
+    outstanding,
+    lastBillDate: purchase.createdAt?.toDate ? purchase.createdAt.toDate() : purchase.purchaseDate ? new Date(purchase.purchaseDate) : undefined,
+    bills: [],
+    purchases: [purchase],
+    ledgerRows: [],
   }
 }
 
@@ -388,7 +407,7 @@ function LedgerCard({
               )}
               {entry.isRegistered && hasCredit && (
                 <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0 text-xs shrink-0">
-                  Credit
+                  Excess
                 </Badge>
               )}
             </div>
@@ -425,7 +444,7 @@ function LedgerCard({
               ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
             </div>
             <div className="text-xs text-gray-400">
-              {dueAmount > 0 ? 'outstanding' : hasCredit || ledgerBalance < 0 ? 'credit' : 'cleared'}
+              {dueAmount > 0 ? 'outstanding' : hasCredit || ledgerBalance < 0 ? 'excess credit' : 'cleared'}
             </div>
           </div>
         </div>
@@ -440,7 +459,7 @@ function LedgerCard({
             <div className="font-semibold text-green-700 dark:text-green-400">₹{fmt(entry.totalPaid)}</div>
           </div>
           <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
-            <div className="text-gray-400 mb-0.5">{hasCredit || (ledgerBalance < 0 && dueAmount <= 0) ? 'Credit' : 'Due'}</div>
+            <div className="text-gray-400 mb-0.5">{hasCredit || (ledgerBalance < 0 && dueAmount <= 0) ? 'Excess' : 'Due'}</div>
             <div className={cn('font-semibold', dueAmount > 0 ? 'text-red-600 dark:text-red-400' : hasCredit || ledgerBalance < 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500')}>
               ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
             </div>
@@ -566,6 +585,7 @@ export default function LedgerPage() {
   const [monthKey, setMonthKey] = useState(() => currentIstMonthKey())
   const [page, setPage] = useState(1)
   const [rangeCursor, setRangeCursor] = useState(RANGE_PAGE_SIZE)
+  const [periodDialogOpen, setPeriodDialogOpen] = useState(false)
 
   const [payEntry, setPayEntry] = useState<CustomerLedgerEntry | null>(null)
   const [payAmount, setPayAmount] = useState('')
@@ -595,7 +615,6 @@ export default function LedgerPage() {
   const {
     data: balances = [],
     isLoading: balancesLoading,
-    isFetching: balancesFetching,
   } = useQuery({
     queryKey: ['customerBalances'],
     queryFn: () => customerBalanceRepository.getAll(),
@@ -628,15 +647,6 @@ export default function LedgerPage() {
     queryKey: ['shopProfile'],
     queryFn: () => settingsRepository.getShopProfile(),
     staleTime: 5 * 60 * 1000,
-  })
-
-  const rebuildMutation = useMutation({
-    mutationFn: () => customerBalanceRepository.rebuildAll(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
-      toast.success('Customer balances rebuilt')
-    },
-    onError: () => toast.error('Failed to rebuild balances'),
   })
 
   const isLoading =
@@ -777,8 +787,9 @@ export default function LedgerPage() {
       const q = search.toLowerCase().trim()
       result = result.filter((e) => matchesLedgerSearch(e, q))
     }
-    if (paymentFilter === 'pending') result = result.filter((e) => e.outstanding !== 0)
+    if (paymentFilter === 'pending') result = result.filter((e) => e.outstanding > 0.001)
     if (paymentFilter === 'paid') result = result.filter((e) => Math.abs(e.outstanding) < 0.001)
+    if (paymentFilter === 'credit') result = result.filter((e) => e.outstanding < -0.001)
     return result
   }, [ledger, search, paymentFilter])
 
@@ -819,8 +830,9 @@ export default function LedgerPage() {
   const existingCount = balances.length
   const newCount = rangeBills.filter((b) => !b.customerId || !registeredIds.has(b.customerId)).length
   const vendorsCount = rangePurchases.length
-  const pendingCount = useMemo(() => ledger.filter((e) => e.outstanding !== 0).length, [ledger])
+  const pendingCount = useMemo(() => ledger.filter((e) => e.outstanding > 0.001).length, [ledger])
   const paidCount = useMemo(() => ledger.filter((e) => Math.abs(e.outstanding) < 0.001).length, [ledger])
+  const creditCount = useMemo(() => ledger.filter((e) => e.outstanding < -0.001).length, [ledger])
 
   const shareRows = useMemo(() => {
     if (!shareLedgerEntry) return []
@@ -912,44 +924,42 @@ export default function LedgerPage() {
         </div>
 
         {!isLoading && (
-          <div className="flex gap-3 flex-wrap items-center">
-            {view === 'existing' && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={rebuildMutation.isPending || balancesFetching}
-                onClick={() => rebuildMutation.mutate()}
-                title="Recompute all customer balance summaries"
-              >
-                {rebuildMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                Rebuild balances
-              </Button>
-            )}
-            <div className="flex items-center gap-2 rounded-lg bg-white dark:bg-[#252d3d]/60 border border-gray-200 dark:border-[#2a3040] px-3 py-2">
-              <IndianRupee className="h-4 w-4 text-gray-400" />
-              <div>
-                <div className="text-xs text-gray-400">Total Billed</div>
-                <div className="font-semibold text-sm text-gray-800 dark:text-white">₹{fmt(totalBilled)}</div>
+          <div className="flex gap-2 sm:gap-3 w-full sm:w-auto">
+            <div
+              className="flex flex-1 sm:flex-none items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg bg-white dark:bg-[#252d3d]/60 border border-gray-200 dark:border-[#2a3040] px-2 py-2 sm:px-3"
+              title="Billed"
+            >
+              <IndianRupee className="h-4 w-4 text-gray-400 shrink-0" />
+              <div className="min-w-0 text-center sm:text-left">
+                <div className="hidden sm:block text-xs text-gray-400">Billed</div>
+                <div className="font-semibold text-xs sm:text-sm text-gray-800 dark:text-white truncate">
+                  ₹{fmt(totalBilled)}
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 rounded-lg bg-white dark:bg-[#252d3d]/60 border border-gray-200 dark:border-[#2a3040] px-3 py-2">
-              <TrendingDown className="h-4 w-4 text-red-400" />
-              <div>
-                <div className="text-xs text-gray-400">Total Outstanding</div>
-                <div className="font-semibold text-sm text-red-600 dark:text-red-400">₹{fmt(totalOutstanding)}</div>
+            <div
+              className="flex flex-1 sm:flex-none items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg bg-white dark:bg-[#252d3d]/60 border border-gray-200 dark:border-[#2a3040] px-2 py-2 sm:px-3"
+              title="Outstanding"
+            >
+              <TrendingDown className="h-4 w-4 text-red-400 shrink-0" />
+              <div className="min-w-0 text-center sm:text-left">
+                <div className="hidden sm:block text-xs text-gray-400">Outstanding</div>
+                <div className="font-semibold text-xs sm:text-sm text-red-600 dark:text-red-400 truncate">
+                  ₹{fmt(totalOutstanding)}
+                </div>
               </div>
             </div>
             {totalCredit > 0 && (
-              <div className="flex items-center gap-2 rounded-lg bg-white dark:bg-[#252d3d]/60 border border-gray-200 dark:border-[#2a3040] px-3 py-2">
-                <ArrowUpRight className="h-4 w-4 text-green-500" />
-                <div>
-                  <div className="text-xs text-gray-400">Total Credit</div>
-                  <div className="font-semibold text-sm text-green-600 dark:text-green-400">₹{fmt(totalCredit)}</div>
+              <div
+                className="flex flex-1 sm:flex-none items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg bg-white dark:bg-[#252d3d]/60 border border-gray-200 dark:border-[#2a3040] px-2 py-2 sm:px-3"
+                title="Credit"
+              >
+                <ArrowUpRight className="h-4 w-4 text-green-500 shrink-0" />
+                <div className="min-w-0 text-center sm:text-left">
+                  <div className="hidden sm:block text-xs text-gray-400">Credit</div>
+                  <div className="font-semibold text-xs sm:text-sm text-green-600 dark:text-green-400 truncate">
+                    ₹{fmt(totalCredit)}
+                  </div>
                 </div>
               </div>
             )}
@@ -957,48 +967,51 @@ export default function LedgerPage() {
         )}
       </div>
 
-      <div className="flex rounded-xl border border-gray-200 dark:border-[#2a3040] bg-white dark:bg-[#252d3d]/60 p-1 w-fit flex-wrap">
+      <div className="flex rounded-xl border border-gray-200 dark:border-[#2a3040] bg-white dark:bg-[#252d3d]/60 p-1 w-full sm:w-fit">
         <button
           onClick={() => switchView('existing')}
+          title="Existing Customers"
           className={cn(
-            'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+            'flex flex-1 sm:flex-none items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2.5 py-2 sm:px-4 text-sm font-medium transition-all',
             view === 'existing'
               ? 'bg-indigo-600 text-white shadow-sm'
               : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
           )}
         >
-          <Users className="h-4 w-4" />
-          Existing Customers
+          <Users className="h-4 w-4 shrink-0" />
+          <span className="hidden sm:inline">Existing Customers</span>
           <span className={cn('rounded-full px-1.5 py-0.5 text-xs font-semibold', view === 'existing' ? 'bg-white/20 text-white' : 'bg-gray-100 dark:bg-[#1e2330] text-gray-600 dark:text-gray-400')}>
             {existingCount}
           </span>
         </button>
         <button
           onClick={() => switchView('new')}
+          title="New Customers"
           className={cn(
-            'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+            'flex flex-1 sm:flex-none items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2.5 py-2 sm:px-4 text-sm font-medium transition-all',
             view === 'new'
               ? 'bg-indigo-600 text-white shadow-sm'
               : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
           )}
         >
-          <UserPlus className="h-4 w-4" />
-          New Customers
+          <UserPlus className="h-4 w-4 shrink-0" />
+          <span className="hidden sm:inline">New Customers</span>
           <span className={cn('rounded-full px-1.5 py-0.5 text-xs font-semibold', view === 'new' ? 'bg-white/20 text-white' : 'bg-gray-100 dark:bg-[#1e2330] text-gray-600 dark:text-gray-400')}>
             {newCount}
           </span>
         </button>
         <button
           onClick={() => switchView('vendors')}
+          title="Vendor Purchases"
           className={cn(
-            'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+            'flex flex-1 sm:flex-none items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2.5 py-2 sm:px-4 text-sm font-medium transition-all',
             view === 'vendors'
               ? 'bg-indigo-600 text-white shadow-sm'
               : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
           )}
         >
-          <ShoppingBag className="h-4 w-4" />
-          Vendor Purchases
+          <ShoppingBag className="h-4 w-4 shrink-0" />
+          <span className="hidden sm:inline">Vendor Purchases</span>
           <span className={cn('rounded-full px-1.5 py-0.5 text-xs font-semibold', view === 'vendors' ? 'bg-white/20 text-white' : 'bg-gray-100 dark:bg-[#1e2330] text-gray-600 dark:text-gray-400')}>
             {vendorsCount}
           </span>
@@ -1028,6 +1041,7 @@ export default function LedgerPage() {
             { value: 'all', label: 'All', count: ledger.length },
             { value: 'pending', label: 'Pending', count: pendingCount },
             { value: 'paid', label: 'Paid', count: paidCount },
+            { value: 'credit', label: 'Credit', count: creditCount },
           ] as const).map(({ value, label, count }) => (
             <button
               key={value}
@@ -1040,6 +1054,8 @@ export default function LedgerPage() {
                     ? 'bg-amber-600 text-white border-amber-600'
                     : value === 'paid'
                       ? 'bg-green-600 text-white border-green-600'
+                      : value === 'credit'
+                        ? 'bg-emerald-600 text-white border-emerald-600'
                       : 'bg-indigo-600 text-white border-indigo-600'
                   : 'border-gray-200 dark:border-[#2a3040] text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[#2a3348]/60'
               )}
@@ -1056,7 +1072,14 @@ export default function LedgerPage() {
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-end gap-3 rounded-xl border border-gray-200 dark:border-[#2a3040] bg-white dark:bg-[#252d3d]/60 p-4">
+      <div className="sm:hidden">
+        <Button type="button" variant="outline" className="w-full justify-start" onClick={() => setPeriodDialogOpen(true)}>
+          <Calendar className="h-4 w-4" />
+          {view === 'existing' ? 'Activity period' : view === 'vendors' ? 'Purchase month' : 'Bill month'}: {MONTH_LABELS[(periodParts?.month ?? 1) - 1]} {periodParts?.year ?? new Date().getFullYear()}
+        </Button>
+      </div>
+
+      <div className="hidden sm:flex flex-col sm:flex-row sm:items-end gap-3 rounded-xl border border-gray-200 dark:border-[#2a3040] bg-white dark:bg-[#252d3d]/60 p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200 shrink-0">
           <Calendar className="h-4 w-4 text-gray-400" />
           {view === 'existing' ? 'Activity period' : view === 'vendors' ? 'Purchase month' : 'Bill month'}
@@ -1108,11 +1131,63 @@ export default function LedgerPage() {
         </p>
       )}
 
+      <Dialog open={periodDialogOpen} onOpenChange={setPeriodDialogOpen}>
+        <DialogContent className="sm:hidden max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {view === 'existing' ? 'Activity period' : view === 'vendors' ? 'Purchase month' : 'Bill month'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500">Month</Label>
+              <select
+                value={periodParts?.month ?? 1}
+                onChange={(e) => {
+                  const m = Number(e.target.value)
+                  const y = periodParts?.year ?? new Date().getFullYear()
+                  setMonthKey(formatMonthKey(y, m))
+                }}
+                className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {MONTH_LABELS.map((label, i) => (
+                  <option key={label} value={i + 1}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500">Year</Label>
+              <select
+                value={periodParts?.year ?? new Date().getFullYear()}
+                onChange={(e) => {
+                  const y = Number(e.target.value)
+                  const m = periodParts?.month ?? 1
+                  setMonthKey(formatMonthKey(y, m))
+                }}
+                className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={resetPeriod}>
+              This month
+            </Button>
+            <Button type="button" onClick={() => setPeriodDialogOpen(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {!isLoading && rangedFiltered.length > 0 && (
         <p className="text-xs text-gray-400">
           Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, rangedFiltered.length)} of {rangedFiltered.length}
           {filtered.length !== rangedFiltered.length ? ` (loaded ${rangedFiltered.length} of ${filtered.length})` : ''}
-          {paymentFilter !== 'all' && ` · ${paymentFilter === 'pending' ? 'Pending' : 'Paid'}`}
+          {paymentFilter !== 'all' && ` · ${paymentFilter === 'pending' ? 'Pending' : paymentFilter === 'paid' ? 'Paid' : 'Credit'}`}
         </p>
       )}
 
@@ -1138,6 +1213,8 @@ export default function LedgerPage() {
                 ? view === 'vendors' ? 'No vendor purchases found.' : 'No pending bills found.'
                 : paymentFilter === 'paid'
                   ? 'No paid bills found.'
+                  : paymentFilter === 'credit'
+                    ? 'No credit balances found.'
                   : view === 'existing'
                     ? 'No customer balances for this period.'
                     : view === 'vendors'
@@ -1447,6 +1524,19 @@ export default function LedgerPage() {
               </DialogTitle>
             </DialogHeader>
             <PurchaseInvoiceView purchase={viewPurchase} />
+            <DialogFooter>
+              {(viewPurchase.remainingAmount ?? Math.max(0, viewPurchase.grandTotal - (viewPurchase.amountPaid ?? 0))) > 0.001 && (
+                <Button
+                  onClick={() => {
+                    setViewPurchase(null)
+                    setPayEntry(purchaseEntryFromInvoice(viewPurchase))
+                  }}
+                >
+                  <CreditCard className="h-4 w-4" />
+                  Pay Invoice
+                </Button>
+              )}
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}

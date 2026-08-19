@@ -154,6 +154,9 @@ export interface Order {
   customerInfo: BillCustomerInfo
   items: OrderItem[]
   estimatedAmount: number
+  advanceAmount?: number
+  advanceMode?: PaymentMode
+  advanceRemarks?: string
   status: OrderStatus
   billId?: string
   orderDate: string      // YYYY-MM-DD, user-selected

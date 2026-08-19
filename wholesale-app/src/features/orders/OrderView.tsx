@@ -113,6 +113,18 @@ export default function OrderView({ order }: OrderViewProps) {
 
       <div className="flex justify-end">
         <div className="w-64 text-sm">
+          {(order.advanceAmount ?? 0) > 0 && (
+            <>
+              <div className="flex justify-between">
+                <span className="pd-muted">Advance Paid</span>
+                <span>{formatCurrency(order.advanceAmount ?? 0)}</span>
+              </div>
+              <div className="flex justify-between pd-primary">
+                <span>Balance After Advance</span>
+                <span>{formatCurrency(Math.max(0, order.estimatedAmount - (order.advanceAmount ?? 0)))}</span>
+              </div>
+            </>
+          )}
           <div className="flex justify-between pd-bold text-base border-t pd-border-light pt-2">
             <span>Estimated Total</span>
             <span className="pd-primary">{formatCurrency(order.estimatedAmount)}</span>
@@ -124,6 +136,13 @@ export default function OrderView({ order }: OrderViewProps) {
         <div className="mt-4 p-3 rounded border pd-border-light" style={{ background: '#f9fafb' }}>
           <p className="text-xs pd-semibold pd-muted uppercase tracking-wide mb-1">Notes</p>
           <p className="text-sm whitespace-pre-line">{order.comment}</p>
+        </div>
+      )}
+
+      {order.advanceRemarks && (
+        <div className="mt-4 p-3 rounded border pd-border-light" style={{ background: '#f9fafb' }}>
+          <p className="text-xs pd-semibold pd-muted uppercase tracking-wide mb-1">Advance Remarks</p>
+          <p className="text-sm whitespace-pre-line">{order.advanceRemarks}</p>
         </div>
       )}
 
