@@ -71,8 +71,9 @@ function sanitizeText(value: string): string {
     .replace(/[ ]{2,}/g, ' ')
 }
 
-function money(value: number): string {
-  return `Rs.${value.toFixed(2)}`
+function money(value: number, includeCurrency = true): string {
+  if (!includeCurrency) return value.toFixed(1)
+  return `Rs ${value.toFixed(2)}`
 }
 
 function center(text: string, width = RECEIPT_WIDTH): string {
@@ -140,12 +141,10 @@ export function buildThermalReceiptText(bill: Bill, shopProfile?: ShopProfile | 
   lines.push(divider('='))
   lines.push(pair('Bill No', bill.billNumber))
   lines.push(pair('Date', billDateLabel(bill)))
-  lines.push(pair('Status', bill.paymentStatus))
   lines.push(divider())
   lines.push(...wrapLine(`Customer: ${bill.customerInfo.name}`))
   lines.push(...wrapLine(`Phone: ${bill.customerInfo.phone}`))
   if (bill.customerInfo.gstNumber) lines.push(...wrapLine(`GST: ${bill.customerInfo.gstNumber}`))
-  if (bill.customerInfo.address) lines.push(...wrapLine(`Addr: ${bill.customerInfo.address}`))
   lines.push(divider())
 
   bill.items.forEach((item, index) => {
@@ -154,29 +153,31 @@ export function buildThermalReceiptText(bill: Bill, shopProfile?: ShopProfile | 
     const total = qty * rate - (Number(item.itemDiscount) || 0)
 
     lines.push(...wrapLine(`${index + 1}. ${item.productName}`))
-    lines.push(pair(`${qty} x ${money(rate)}`, money(total)))
+    lines.push(pair(`${qty} x ${money(rate, false)} = `, money(total)))
     if ((item.itemDiscount ?? 0) > 0) {
       lines.push(pair('  Disc', `- ${money(item.itemDiscount)}`))
     }
   })
 
   lines.push(divider())
-  lines.push(pair('Subtotal', money(bill.subtotal)))
-  if ((bill.discount ?? 0) > 0) lines.push(pair('Bill Discount', `- ${money(bill.discount)}`))
-  if (bill.isGstBill && (bill.gstAmount ?? 0) > 0) lines.push(pair('GST', money(bill.gstAmount)))
-  lines.push(pair('Grand Total', money(bill.grandTotal)))
-  lines.push(pair('Paid', money(bill.amountPaid)))
-  if ((bill.remainingAmount ?? 0) > 0) {
-    lines.push(pair(bill.movedToLedger ? 'On Ledger Due' : 'Balance Due', money(bill.remainingAmount)))
+  // lines.push(pair('Subtotal', money(bill.subtotal)))
+  if ((bill.discount ?? 0) > 0) lines.push(pair('Bill Discount: ', `- ${money(bill.discount)}`))
+  if (bill.isGstBill && (bill.gstAmount ?? 0) > 0) lines.push(pair('GST: ', money(bill.gstAmount)))
+  lines.push(pair('Grand Total: ', money(bill.grandTotal)))
+  if (bill.amountPaid > 0) {
+    lines.push(pair('Paid: ', money(bill.amountPaid)));
+    if ((bill.remainingAmount ?? 0) > 0) {
+      lines.push(divider('-'))
+      lines.push(pair('Balance Due: ', money(bill.remainingAmount)))
+    }
   }
-  if (bill.comment) {
-    lines.push(divider())
-    lines.push('Notes:')
-    lines.push(...wrapLine(bill.comment))
-  }
+  // if (bill.comment) {
+  //   lines.push(divider())
+  //   lines.push('Notes:')
+  //   lines.push(...wrapLine(bill.comment))
+  // }
   lines.push(divider('='))
-  lines.push(center('Thank you'))
-  lines.push('', '', '')
+  lines.push(center(`Thank you _/\\_`))
 
   return `${lines.join('\n')}\n`
 }
