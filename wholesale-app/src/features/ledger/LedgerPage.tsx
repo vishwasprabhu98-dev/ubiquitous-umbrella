@@ -739,6 +739,8 @@ export default function LedgerPage() {
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['purchases'] })
       queryClient.invalidateQueries({ queryKey: ['purchases', 'vendors-month'] })
+      queryClient.invalidateQueries({ queryKey: ['transactions', 'balance-sheet'] })
+      queryClient.invalidateQueries({ queryKey: ['bills', 'balance-sheet'] })
       toast.success(
         entry.purchaseId
           ? 'Vendor payment recorded'

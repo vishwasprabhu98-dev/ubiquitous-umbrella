@@ -7,7 +7,6 @@ import {
   Loader2,
   Receipt,
   Search,
-  Download,
   ChevronDown,
   ChevronUp,
   ChevronLeft,
@@ -19,6 +18,7 @@ import {
   BookOpen,
   Undo2,
   Share2,
+  MessageCircle,
   Printer,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -45,7 +45,7 @@ import {
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { sharePdfBlob, downloadPdfBlob } from '@/lib/sharePdf'
+import { sharePdfBlob, shareElementAsImage } from '@/lib/sharePdf'
 import { createBillPdfBlob } from '@/lib/billPdf'
 import { printBillToBlePrinter } from '@/lib/thermalPrinter'
 import type { Bill, BillStatus, PaymentMode, PaymentStatus } from '@/types'
@@ -239,6 +239,7 @@ export default function BillingPage() {
   const [search, setSearch] = useState('')
   const [viewBill, setViewBill] = useState<Bill | null>(null)
   const [sharingPdf, setSharingPdf] = useState(false)
+  const [whatsappHideDue, setWhatsappHideDue] = useState(false)
   const [printingReceipt, setPrintingReceipt] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
@@ -641,6 +642,8 @@ export default function BillingPage() {
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
+      queryClient.invalidateQueries({ queryKey: ['bills', 'balance-sheet'] })
+      queryClient.invalidateQueries({ queryKey: ['transactions', 'balance-sheet'] })
       toast.success(`Payment of ${formatCurrency(amount)} recorded`)
       setPaymentBill(null)
     } catch {
@@ -660,8 +663,14 @@ export default function BillingPage() {
       if (q && !billNo.includes(q) && !customerName.includes(q))
         return false
 
-      // Payment status
-      if (filterPayStatus !== 'ALL' && b.paymentStatus !== filterPayStatus) return false
+      // Payment status — Unpaid includes both unpaid and partially paid
+      if (filterPayStatus === 'PAID' && b.paymentStatus !== 'PAID') return false
+      if (
+        filterPayStatus === 'UNPAID' &&
+        b.paymentStatus !== 'UNPAID' &&
+        b.paymentStatus !== 'PARTIAL'
+      )
+        return false
 
       // Date filter (IST calendar days)
       const billDay = getBillDateString(b)
@@ -868,7 +877,6 @@ export default function BillingPage() {
                       { value: 'ALL', label: 'All' },
                       { value: 'PAID', label: 'Paid' },
                       { value: 'UNPAID', label: 'Unpaid' },
-                      { value: 'PARTIAL', label: 'Partial' },
                     ] as { value: PaymentStatus | 'ALL'; label: string }[]
                   ).map((opt) => (
                     <button
@@ -904,7 +912,7 @@ export default function BillingPage() {
               ? ` from ${filterFrom} to ${filterTo}`
               : ''}
             {filterPayStatus !== 'ALL'
-              ? ` · ${filterPayStatus === 'PAID' ? 'Paid' : filterPayStatus === 'PARTIAL' ? 'Partial' : 'Unpaid'} payments`
+              ? ` · ${filterPayStatus === 'PAID' ? 'Paid' : 'Unpaid'} payments`
               : ''}
           </p>
         )}
@@ -1499,12 +1507,15 @@ export default function BillingPage() {
 
       {/* ── Invoice View Dialog ── */}
       {viewBill && (
-        <Dialog open={!!viewBill} onOpenChange={() => setViewBill(null)}>
+        <Dialog open={!!viewBill} onOpenChange={() => { setViewBill(null); setWhatsappHideDue(false) }}>
           <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto print:shadow-none">
             <DialogHeader className="print:hidden">
               <DialogTitle>Invoice — {viewBill.billNumber}</DialogTitle>
             </DialogHeader>
-            <InvoiceView bill={viewBill} />
+            <InvoiceView
+              bill={viewBill}
+              hideBalanceDue={whatsappHideDue && Boolean(viewBill.customerId)}
+            />
             <DialogFooter className="print:hidden">
               <Button
                 variant="outline"
@@ -1540,7 +1551,7 @@ export default function BillingPage() {
                     await sharePdfBlob({
                       blob,
                       filename: `invoice-${viewBill.billNumber}.pdf`,
-                      title: `Invoice ${viewBill.billNumber} \n\n vishwas`,
+                      title: `Invoice ${viewBill.billNumber}`,
                       onFallback: (msg) => toast.info(msg),
                     })
                   } catch (err) {
@@ -1556,26 +1567,40 @@ export default function BillingPage() {
                 Share
               </Button>
               <Button
+                variant="outline"
                 disabled={sharingPdf || shopProfileLoading}
                 title={shopProfileLoading ? 'Loading invoice…' : undefined}
                 onClick={async () => {
                   setSharingPdf(true)
+                  const hideDue = Boolean(viewBill.customerId)
+                  if (hideDue) {
+                    setWhatsappHideDue(true)
+                    await new Promise<void>((resolve) => {
+                      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+                    })
+                  }
                   try {
-                    const blob = await createBillPdfBlob(viewBill, shopProfile)
-                    await downloadPdfBlob({
-                      blob,
-                      filename: `invoice-${viewBill.billNumber}.pdf`,
+                    await shareElementAsImage({
+                      elementId: 'invoice-print',
+                      filename: `invoice-${viewBill.billNumber}.jpg`,
+                      title: `Invoice ${viewBill.billNumber}`,
+                      text: `Invoice ${viewBill.billNumber}`,
+                      phone: viewBill.customerInfo?.phone,
+                      onError: (msg) => toast.error(msg),
                       onFallback: (msg) => toast.info(msg),
                     })
-                  } catch {
-                    toast.error('Failed to download invoice')
+                  } catch (err) {
+                    if (err instanceof Error && err.name !== 'AbortError') {
+                      toast.error('Failed to share invoice')
+                    }
                   } finally {
+                    setWhatsappHideDue(false)
                     setSharingPdf(false)
                   }
                 }}
               >
-                <Download className="h-4 w-4" />
-                Download PDF
+                {sharingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                WhatsApp
               </Button>
             </DialogFooter>
           </DialogContent>

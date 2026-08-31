@@ -17,8 +17,8 @@ import {
   X,
   Receipt,
   Share2,
+  MessageCircle,
   Edit2,
-  Download,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
@@ -42,7 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { sharePdfBlob, downloadPdfBlob } from '@/lib/sharePdf'
+import { sharePdfBlob, shareElementAsImage } from '@/lib/sharePdf'
 import { createOrderPdfBlob } from '@/lib/orderPdf'
 import OrderView from './OrderView'
 import type { Order, OrderStatus, PaymentMode, PaymentStatus, TimeSlot } from '@/types'
@@ -1322,21 +1322,26 @@ export default function OrdersPage() {
                 onClick={async () => {
                   setSharingPdf(true)
                   try {
-                    const blob = await createOrderPdfBlob(detailOrder, shopProfile)
-                    await downloadPdfBlob({
-                      blob,
-                      filename: `order-${detailOrder.orderNumber}.pdf`,
+                    await shareElementAsImage({
+                      elementId: 'order-print',
+                      filename: `order-${detailOrder.orderNumber}.jpg`,
+                      title: `Order ${detailOrder.orderNumber}`,
+                      text: `Order ${detailOrder.orderNumber}`,
+                      phone: detailOrder.customerInfo?.phone,
+                      onError: (msg) => toast.error(msg),
                       onFallback: (msg) => toast.info(msg),
                     })
-                  } catch {
-                    toast.error('Failed to download order')
+                  } catch (err) {
+                    if (err instanceof Error && err.name !== 'AbortError') {
+                      toast.error('Failed to share order')
+                    }
                   } finally {
                     setSharingPdf(false)
                   }
                 }}
               >
-                {sharingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                Download PDF
+                {sharingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                WhatsApp
               </Button>
 
               {detailOrder.status !== 'DELIVERED' && detailOrder.status !== 'REJECTED' && (

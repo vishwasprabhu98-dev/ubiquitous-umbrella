@@ -50,6 +50,24 @@ export const purchaseRepository = {
     return snapshot.docs.map((d) => ({ ...d.data(), purchaseId: d.id }) as PurchaseInvoice)
   },
 
+  async getByDateRange(from: Date, to: Date): Promise<PurchaseInvoice[]> {
+    try {
+      const q = query(
+        purchasesRef(),
+        where('createdAt', '>=', Timestamp.fromDate(from)),
+        where('createdAt', '<=', Timestamp.fromDate(to)),
+        orderBy('createdAt', 'desc')
+      )
+      const snapshot = await getDocs(q)
+      return snapshot.docs.map((d) => ({ ...d.data(), purchaseId: d.id }) as PurchaseInvoice)
+    } catch (err) {
+      const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
+      if (code !== 'failed-precondition') throw err
+      const all = await this.getAll()
+      return all.filter((p) => inCreatedAtRange(p.createdAt, from, to))
+    }
+  },
+
   async getById(purchaseId: string): Promise<PurchaseInvoice | null> {
     const snapshot = await getDoc(doc(db, COLLECTIONS.PURCHASES, purchaseId))
     if (!snapshot.exists()) return null

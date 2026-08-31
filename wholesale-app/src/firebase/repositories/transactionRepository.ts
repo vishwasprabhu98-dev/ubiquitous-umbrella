@@ -40,6 +40,24 @@ export const transactionRepository = {
     return snapshot.docs.map((d) => ({ ...d.data(), transactionId: d.id }) as Transaction)
   },
 
+  async getByDateRange(from: Date, to: Date): Promise<Transaction[]> {
+    try {
+      const q = query(
+        transactionsRef(),
+        where('createdAt', '>=', Timestamp.fromDate(from)),
+        where('createdAt', '<=', Timestamp.fromDate(to)),
+        orderBy('createdAt', 'desc')
+      )
+      const snapshot = await getDocs(q)
+      return snapshot.docs.map((d) => ({ ...d.data(), transactionId: d.id }) as Transaction)
+    } catch (err) {
+      const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
+      if (code !== 'failed-precondition') throw err
+      const all = await this.getAll()
+      return all.filter((tx) => inCreatedAtRange(tx.createdAt, from, to))
+    }
+  },
+
   async getByBill(billId: string): Promise<Transaction[]> {
     const q = query(transactionsRef(), where('billId', '==', billId))
     const snapshot = await getDocs(q)

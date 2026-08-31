@@ -133,6 +133,36 @@ function canvasToPdfBlob(canvas: HTMLCanvasElement): Blob {
   return pdf.output('blob')
 }
 
+function canvasToImageBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob && blob.size > 0) resolve(blob)
+        else reject(new Error('Could not encode document image'))
+      },
+      'image/jpeg',
+      0.92
+    )
+  })
+}
+
+/** Digits-only WhatsApp phone (defaults 10-digit Indian numbers to +91). */
+export function toWhatsAppPhone(phone?: string | null): string | null {
+  const digits = (phone ?? '').replace(/\D/g, '')
+  if (digits.length < 10) return null
+  if (digits.length === 10) return `91${digits}`
+  return digits
+}
+
+function openWhatsAppChat(phone: string | null | undefined, text: string) {
+  const encoded = encodeURIComponent(text)
+  const waPhone = toWhatsAppPhone(phone)
+  const url = waPhone
+    ? `https://wa.me/${waPhone}?text=${encoded}`
+    : `https://wa.me/?text=${encoded}`
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 /** iOS ignores `<a download>` — open PDF in a new tab so the user can share from the viewer. */
 function openPdfInNewTab(blob: Blob): boolean {
   const url = URL.createObjectURL(blob)
@@ -155,10 +185,12 @@ function downloadBlobDesktop(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-async function tryNativeFileShare(file: File, title: string): Promise<boolean> {
+async function tryNativeFileShare(file: File, title: string, text?: string): Promise<boolean> {
   if (typeof navigator.share !== 'function') return false
 
-  const shareData: ShareData = { files: [file], title }
+  const shareData: ShareData = text
+    ? { files: [file], title, text }
+    : { files: [file], title }
 
   try {
     if (navigator.canShare && !navigator.canShare(shareData)) return false
@@ -204,6 +236,39 @@ export async function elementToPdfBlob(
   }
 }
 
+export async function elementToImageBlob(
+  elementId: string,
+  onError?: (msg: string) => void
+): Promise<Blob | null> {
+  const element = await waitForElement(elementId)
+  if (!element) {
+    onError?.('Document not rendered yet — please wait and try again')
+    return null
+  }
+
+  let canvas: HTMLCanvasElement
+  try {
+    canvas = await renderElementToCanvas(element)
+  } catch (err) {
+    console.error('[elementToImageBlob] html2canvas error:', err)
+    onError?.('Failed to render document image')
+    return null
+  }
+
+  if (canvas.width === 0 || canvas.height === 0) {
+    onError?.('Document rendered empty — please try again')
+    return null
+  }
+
+  try {
+    return await canvasToImageBlob(canvas)
+  } catch (err) {
+    console.error('[elementToImageBlob] encode error:', err)
+    onError?.('Failed to create image file')
+    return null
+  }
+}
+
 export async function sharePdfBlob(options: {
   blob: Blob
   filename: string
@@ -225,6 +290,33 @@ export async function sharePdfBlob(options: {
 
   downloadBlobDesktop(options.blob, options.filename)
   options.onFallback?.('PDF downloaded — attach it from your Downloads folder to share.')
+}
+
+/** Share a document image (JPEG). Prefers the system share sheet (WhatsApp on phone). */
+export async function shareImageBlob(options: {
+  blob: Blob
+  filename: string
+  title: string
+  text?: string
+  phone?: string | null
+  onFallback?: (message: string) => void
+}): Promise<void> {
+  const filename = options.filename.endsWith('.jpg') || options.filename.endsWith('.jpeg')
+    ? options.filename
+    : `${options.filename.replace(/\.pdf$/i, '')}.jpg`
+  const file = new File([options.blob], filename, { type: 'image/jpeg' })
+  const text = options.text ?? options.title
+
+  const shared = await tryNativeFileShare(file, options.title, text)
+  if (shared) return
+
+  downloadBlobDesktop(options.blob, filename)
+  openWhatsAppChat(options.phone, text)
+  options.onFallback?.(
+    options.phone
+      ? 'Image saved — attach it in the WhatsApp chat that just opened.'
+      : 'Image saved — open WhatsApp and attach it from Downloads.'
+  )
 }
 
 export async function downloadPdfBlob(options: {
@@ -255,6 +347,28 @@ export async function shareElementAsPdf(options: {
     blob,
     filename: options.filename,
     title: options.title,
+    onFallback: options.onFallback,
+  })
+}
+
+export async function shareElementAsImage(options: {
+  elementId: string
+  filename: string
+  title: string
+  text?: string
+  phone?: string | null
+  onError?: (msg: string) => void
+  onFallback?: (message: string) => void
+}): Promise<void> {
+  const blob = await elementToImageBlob(options.elementId, options.onError)
+  if (!blob) return
+
+  await shareImageBlob({
+    blob,
+    filename: options.filename,
+    title: options.title,
+    text: options.text,
+    phone: options.phone,
     onFallback: options.onFallback,
   })
 }

@@ -7,9 +7,11 @@ import type { Bill } from '@/types'
 
 interface InvoiceViewProps {
   bill: Bill
+  /** Hide Balance Due (e.g. WhatsApp share for registered customers). */
+  hideBalanceDue?: boolean
 }
 
-export default function InvoiceView({ bill }: InvoiceViewProps) {
+export default function InvoiceView({ bill, hideBalanceDue = false }: InvoiceViewProps) {
   const { data: shopProfile, isLoading } = useQuery({
     queryKey: ['shopProfile'],
     queryFn: () => settingsRepository.getShopProfile(),
@@ -164,7 +166,7 @@ export default function InvoiceView({ bill }: InvoiceViewProps) {
             <span>Amount Paid</span>
             <span>{formatCurrency(bill.amountPaid)}</span>
           </div>
-          {bill.remainingAmount > 0 && !bill.movedToLedger && (
+          {bill.remainingAmount > 0 && !bill.movedToLedger && !hideBalanceDue && (
             <div className="flex justify-between pd-semibold pd-danger border-t pt-1">
               <span>Balance Due</span>
               <span>{formatCurrency(bill.remainingAmount)}</span>
