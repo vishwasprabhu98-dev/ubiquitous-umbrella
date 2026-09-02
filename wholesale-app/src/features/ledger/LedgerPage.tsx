@@ -380,103 +380,106 @@ function LedgerCard({
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-[#2a3040] bg-white dark:bg-[#252d3d]/60 overflow-hidden">
-      <button
-        onClick={() => setExpanded((p) => !p)}
-        className="w-full text-left px-5 py-4 hover:bg-gray-50 dark:hover:bg-[#2a3348]/60 transition-colors"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className="font-semibold text-gray-900 dark:text-white truncate">
-                {entry.name}
-              </span>
-              {!entry.isRegistered && entry.billNumber && (
-                <Badge variant="outline" className="font-mono text-xs shrink-0">
-                  {entry.billNumber}
-                </Badge>
-              )}
-              {!entry.isRegistered && entry.outstanding <= 0 && (
-                <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0 text-xs shrink-0">
-                  Paid
-                </Badge>
-              )}
-              {!entry.isRegistered && entry.outstanding > 0 && (
-                <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0 text-xs shrink-0">
-                  Pending
-                </Badge>
-              )}
-              {entry.isRegistered && !hasOutstanding && !hasCredit && entry.totalBills > 0 && (
-                <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0 text-xs shrink-0">
-                  Cleared
-                </Badge>
-              )}
-              {entry.isRegistered && hasCredit && (
-                <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0 text-xs shrink-0">
-                  Excess
-                </Badge>
-              )}
+      <div className="px-5 py-4">
+        <button
+          type="button"
+          onClick={() => setExpanded((p) => !p)}
+          className="w-full text-left rounded-lg -mx-1 px-1 py-0.5 hover:bg-gray-50 dark:hover:bg-[#2a3348]/60 transition-colors"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="font-semibold text-gray-900 dark:text-white truncate">
+                  {entry.name}
+                </span>
+                {!entry.isRegistered && entry.billNumber && (
+                  <Badge variant="outline" className="font-mono text-xs shrink-0">
+                    {entry.billNumber}
+                  </Badge>
+                )}
+                {!entry.isRegistered && entry.outstanding <= 0 && (
+                  <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0 text-xs shrink-0">
+                    Paid
+                  </Badge>
+                )}
+                {!entry.isRegistered && entry.outstanding > 0 && (
+                  <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0 text-xs shrink-0">
+                    Pending
+                  </Badge>
+                )}
+                {entry.isRegistered && !hasOutstanding && !hasCredit && entry.totalBills > 0 && (
+                  <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0 text-xs shrink-0">
+                    Cleared
+                  </Badge>
+                )}
+                {entry.isRegistered && hasCredit && (
+                  <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0 text-xs shrink-0">
+                    Excess
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
+                <span className="flex items-center gap-1">
+                  <Phone className="h-3 w-3" />
+                  {entry.phone}
+                </span>
+                {entry.isRegistered ? (
+                  <>
+                    <span className="flex items-center gap-1">
+                      <Receipt className="h-3 w-3" />
+                      {entry.totalBills} {entry.totalBills === 1 ? 'bill' : 'bills'}
+                    </span>
+                    <span>Last: {formatDate(entry.lastBillDate)}</span>
+                  </>
+                ) : (
+                  <span>Bill date: {formatDate(entry.lastBillDate)}</span>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
-              <span className="flex items-center gap-1">
-                <Phone className="h-3 w-3" />
-                {entry.phone}
-              </span>
-              {entry.isRegistered ? (
-                <>
-                  <span className="flex items-center gap-1">
-                    <Receipt className="h-3 w-3" />
-                    {entry.totalBills} {entry.totalBills === 1 ? 'bill' : 'bills'}
-                  </span>
-                  <span>Last: {formatDate(entry.lastBillDate)}</span>
-                </>
-              ) : (
-                <span>Bill date: {formatDate(entry.lastBillDate)}</span>
-              )}
+
+            <div className="text-right shrink-0">
+              <div
+                className={cn(
+                  'text-lg font-bold',
+                  dueAmount > 0
+                    ? 'text-red-600 dark:text-red-400'
+                    : hasCredit || ledgerBalance < 0
+                      ? 'text-green-600 dark:text-green-400'
+                      : 'text-gray-500'
+                )}
+              >
+                ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
+              </div>
+              <div className="text-xs text-gray-400">
+                {dueAmount > 0 ? 'outstanding' : hasCredit || ledgerBalance < 0 ? 'excess credit' : 'cleared'}
+              </div>
             </div>
           </div>
 
-          <div className="text-right shrink-0">
-            <div
-              className={cn(
-                'text-lg font-bold',
-                dueAmount > 0
-                  ? 'text-red-600 dark:text-red-400'
-                  : hasCredit || ledgerBalance < 0
-                    ? 'text-green-600 dark:text-green-400'
-                    : 'text-gray-500'
-              )}
-            >
-              ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
+          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+            <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
+              <div className="text-gray-400 mb-0.5">Billed</div>
+              <div className="font-semibold text-gray-800 dark:text-gray-200">₹{fmt(billedAmount)}</div>
             </div>
-            <div className="text-xs text-gray-400">
-              {dueAmount > 0 ? 'outstanding' : hasCredit || ledgerBalance < 0 ? 'excess credit' : 'cleared'}
+            <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
+              <div className="text-gray-400 mb-0.5">Paid</div>
+              <div className="font-semibold text-green-700 dark:text-green-400">₹{fmt(paidAmount)}</div>
             </div>
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-          <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
-            <div className="text-gray-400 mb-0.5">Billed</div>
-            <div className="font-semibold text-gray-800 dark:text-gray-200">₹{fmt(billedAmount)}</div>
-          </div>
-          <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
-            <div className="text-gray-400 mb-0.5">Paid</div>
-            <div className="font-semibold text-green-700 dark:text-green-400">₹{fmt(paidAmount)}</div>
-          </div>
-          <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
-            <div className="text-gray-400 mb-0.5">{hasCredit || (ledgerBalance < 0 && dueAmount <= 0) ? 'Excess' : 'Due'}</div>
-            <div className={cn('font-semibold', dueAmount > 0 ? 'text-red-600 dark:text-red-400' : hasCredit || ledgerBalance < 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500')}>
-              ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
+            <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
+              <div className="text-gray-400 mb-0.5">{hasCredit || (ledgerBalance < 0 && dueAmount <= 0) ? 'Excess' : 'Due'}</div>
+              <div className={cn('font-semibold', dueAmount > 0 ? 'text-red-600 dark:text-red-400' : hasCredit || ledgerBalance < 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500')}>
+                ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
+              </div>
             </div>
           </div>
-        </div>
+        </button>
 
         <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">
             {entry.isRegistered && hasOutstanding && (
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onRecordPayment(entry) }}
+                onClick={() => onRecordPayment(entry)}
                 className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium border border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/40 transition-colors"
               >
                 <CreditCard className="h-3.5 w-3.5" />
@@ -486,7 +489,7 @@ function LedgerCard({
             {entry.isRegistered && hasCredit && (
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onRecordPayment(entry) }}
+                onClick={() => onRecordPayment(entry)}
                 className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/40 transition-colors"
               >
                 <CreditCard className="h-3.5 w-3.5" />
@@ -496,7 +499,7 @@ function LedgerCard({
             {entry.purchaseId && hasOutstanding && (
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onRecordPayment(entry) }}
+                onClick={() => onRecordPayment(entry)}
                 className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium border border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/40 transition-colors"
               >
                 <CreditCard className="h-3.5 w-3.5" />
@@ -505,8 +508,7 @@ function LedgerCard({
             )}
             <button
               type="button"
-              onClick={async (e) => {
-                e.stopPropagation()
+              onClick={async () => {
                 setSharingBusy(true)
                 try {
                   const full = await ensureDetail()
@@ -523,15 +525,19 @@ function LedgerCard({
               Share Ledger
             </button>
           </div>
-          <span className="flex items-center gap-1 text-xs text-indigo-500 dark:text-indigo-400">
+          <button
+            type="button"
+            onClick={() => setExpanded((p) => !p)}
+            className="flex items-center gap-1 text-xs text-indigo-500 dark:text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300"
+          >
             {expanded ? (
               <>Hide ledger <ChevronUp className="h-3.5 w-3.5" /></>
             ) : (
               <>View ledger <ChevronDown className="h-3.5 w-3.5" /></>
             )}
-          </span>
+          </button>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-gray-100 dark:border-[#2a3040] bg-gray-50/40 dark:bg-[#1e2330]/30">

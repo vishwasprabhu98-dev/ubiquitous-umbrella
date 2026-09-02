@@ -76,22 +76,20 @@ function UpcomingOrderRow({
         <span className="font-mono text-xs text-blue-600">{order.orderNumber}</span>
         <span className="text-gray-300 dark:text-gray-600">·</span>
         <span className="font-medium text-gray-900 dark:text-white">{order.customerInfo.name}</span>
-        <span className="text-gray-300 dark:text-gray-600">·</span>
-        <span className={`whitespace-nowrap ${overdue ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500'}`}>
-          {dateLabel}
-        </span>
         {overdue && (
           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
             Pending
           </span>
         )}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span className={`whitespace-nowrap ${overdue ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500'}`}>
+          {dateLabel}
+        </span>
         {order.timeSlot && (
-          <>
-            <span className="text-gray-300 dark:text-gray-600">·</span>
-            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${TIME_SLOT_STYLE[order.timeSlot]}`}>
-              {TIME_SLOT_LABEL[order.timeSlot]}
-            </span>
-          </>
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${TIME_SLOT_STYLE[order.timeSlot]}`}>
+            {TIME_SLOT_LABEL[order.timeSlot]}
+          </span>
         )}
       </div>
       <div className="mt-1 text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
@@ -224,7 +222,7 @@ export default function DashboardPage() {
             ) : !hasUpcoming ? (
               <div className="py-12 text-center text-sm text-gray-400">No upcoming orders</div>
             ) : (
-              <div className="space-y-3 max-h-[min(70vh,36rem)] overflow-y-auto pr-0.5">
+              <div className="space-y-3">
                 <OrderSection
                   title="Today"
                   count={todayOrders.length}

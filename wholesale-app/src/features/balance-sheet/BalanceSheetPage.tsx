@@ -29,6 +29,7 @@ import { billRepository } from '@/firebase/repositories/billRepository'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { purchaseRepository } from '@/firebase/repositories/purchaseRepository'
 import {
+  customerBalanceRepository,
   LEDGER_PAYMENT_REF,
 } from '@/firebase/repositories/customerBalanceRepository'
 import { transactionRepository } from '@/firebase/repositories/transactionRepository'
@@ -39,7 +40,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, cn } from '@/lib/utils'
 import { istDayEnd, istDayStart } from '@/lib/istDate'
-import type { Bill, PurchaseInvoice, Transaction } from '@/types'
+import type { Bill, Transaction } from '@/types'
 
 const COLORS = ['#2563eb', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 const TABLE_PAGE_SIZE = 25
@@ -49,8 +50,6 @@ interface CustomerBalanceRow {
   name: string
   totalBillAmount: number
   paidAmount: number
-  /** Unpaid remainder on purchases from this customer — offsets what they owe (same as ledger). */
-  purchaseCredit: number
   pendingAmount: number
   isRegistered: boolean
 }
@@ -59,15 +58,12 @@ function rangeBounds(fromDate: string, toDate: string) {
   return { from: istDayStart(fromDate), to: istDayEnd(toDate) }
 }
 
-function purchaseRemaining(p: PurchaseInvoice): number {
-  return p.remainingAmount ?? Math.max(0, (p.grandTotal ?? 0) - (p.amountPaid ?? 0))
-}
-
 function buildCustomerBalances(
   bills: Bill[],
   ledgerPayments: Transaction[],
-  customerPurchases: PurchaseInvoice[],
-  registeredIds: Set<string>
+  registeredIds: Set<string>,
+  /** Ledger outstanding by customerId — source of truth for existing-customer pending. */
+  ledgerOutstandingById: Map<string, number>
 ): CustomerBalanceRow[] {
   const map = new Map<string, CustomerBalanceRow>()
 
@@ -79,7 +75,6 @@ function buildCustomerBalances(
       name,
       totalBillAmount: 0,
       paidAmount: 0,
-      purchaseCredit: 0,
       pendingAmount: 0,
       isRegistered,
     }
@@ -96,9 +91,12 @@ function buildCustomerBalances(
     const row = ensure(key, name, isRegistered)
     row.totalBillAmount += bill.grandTotal ?? 0
     row.paidAmount += bill.amountPaid ?? 0
+    if (!isRegistered) {
+      row.pendingAmount += bill.remainingAmount ?? Math.max(0, (bill.grandTotal ?? 0) - (bill.amountPaid ?? 0))
+    }
   }
 
-  // Ledger payments reduce outstanding for registered customers (not stored on bills)
+  // Ledger payments count toward period "Paid" for registered customers
   for (const tx of ledgerPayments) {
     if (!tx.customerId || !registeredIds.has(tx.customerId)) continue
     const row = map.get(tx.customerId)
@@ -109,27 +107,12 @@ function buildCustomerBalances(
     }
   }
 
-  // Purchases from existing customers = credit against their bills (matches ledger)
-  for (const purchase of customerPurchases) {
-    if (purchase.status !== 'SAVED') continue
-    const customerId = purchase.customerId
-    if (!customerId || !registeredIds.has(customerId)) continue
-    if (!(purchase.vendorType === 'customer' || purchase.customerId)) continue
-    const credit = purchaseRemaining(purchase)
-    if (credit <= 0.001) continue
-    const row = map.get(customerId)
-    if (row) {
-      row.purchaseCredit += credit
-    } else {
-      ensure(customerId, 'Customer', true).purchaseCredit += credit
-    }
-  }
-
   for (const row of map.values()) {
-    row.pendingAmount = Math.max(
-      0,
-      row.totalBillAmount - row.paidAmount - row.purchaseCredit
-    )
+    if (row.isRegistered) {
+      // Pending comes from ledger balance — do not recompute from period bills
+      const ledgerDue = ledgerOutstandingById.get(row.key)
+      row.pendingAmount = ledgerDue != null ? Math.max(0, ledgerDue) : 0
+    }
   }
 
   return Array.from(map.values()).sort((a, b) => b.totalBillAmount - a.totalBillAmount)
@@ -216,7 +199,7 @@ function CustomerBalanceTable({
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
                             Cleared
                           </span>
-                        ) : cb.paidAmount > 0 || cb.purchaseCredit > 0 ? (
+                        ) : cb.paidAmount > 0 ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300">
                             Partial
                           </span>
@@ -318,7 +301,14 @@ export default function BalanceSheetPage() {
       list.map((c) => ({ customerId: c.customerId, name: c.name })),
   })
 
-  const isLoading = billsLoading || purchasesLoading || txLoading || customersLoading
+  const { data: ledgerBalances = [], isLoading: ledgerBalancesLoading } = useQuery({
+    queryKey: ['customerBalances'],
+    queryFn: () => customerBalanceRepository.getAll(),
+    staleTime: 30_000,
+  })
+
+  const isLoading =
+    billsLoading || purchasesLoading || txLoading || customersLoading || ledgerBalancesLoading
 
   const registeredIds = useMemo(
     () => new Set(customers.map((c) => c.customerId)),
@@ -330,6 +320,14 @@ export default function BalanceSheetPage() {
     for (const c of customers) m.set(c.customerId, c.name)
     return m
   }, [customers])
+
+  const ledgerOutstandingById = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const b of ledgerBalances) {
+      m.set(b.customerId, b.outstanding ?? 0)
+    }
+    return m
+  }, [ledgerBalances])
 
   const ledgerPayments = useMemo(
     () =>
@@ -348,8 +346,8 @@ export default function BalanceSheetPage() {
     const rows = buildCustomerBalances(
       bills,
       ledgerPayments,
-      savedPurchases,
-      registeredIds
+      registeredIds,
+      ledgerOutstandingById
     )
     for (const row of rows) {
       if (row.isRegistered && customerNameById.has(row.key)) {
@@ -357,7 +355,7 @@ export default function BalanceSheetPage() {
       }
     }
     return rows
-  }, [bills, ledgerPayments, savedPurchases, registeredIds, customerNameById])
+  }, [bills, ledgerPayments, registeredIds, ledgerOutstandingById, customerNameById])
 
   const existingBalances = useMemo(
     () => customerBalances.filter((r) => r.isRegistered),
