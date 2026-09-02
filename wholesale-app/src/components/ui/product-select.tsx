@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronDown, Search, Star } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { sortProductsForSelect } from '@/lib/products'
@@ -29,7 +29,6 @@ export function ProductSelect({
 }: ProductSelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const searchRef = useRef<HTMLInputElement>(null)
 
   const selected = products.find((p) => p.productId === value)
   const sorted = useMemo(() => sortProductsForSelect(products), [products])
@@ -44,12 +43,6 @@ export function ProductSelect({
         p.productId.toLowerCase().includes(q)
     )
   }, [q, starred, sorted])
-
-  useEffect(() => {
-    if (!open) return
-    const t = window.setTimeout(() => searchRef.current?.focus(), 50)
-    return () => window.clearTimeout(t)
-  }, [open])
 
   const pick = (productId: string) => {
     onChange(productId)
@@ -97,7 +90,6 @@ export function ProductSelect({
           <div className="relative px-4 pb-3">
             <Search className="absolute left-7 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
-              ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search all products..."

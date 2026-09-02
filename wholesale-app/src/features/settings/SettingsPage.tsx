@@ -1,4 +1,13 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useState } from 'react'
+import { Users, Package, Tags, Hash, Store, ShieldCheck, RefreshCw } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import CustomerManagement from './CustomerManagement'
 import ProductManagement from './ProductManagement'
 import PricingManagement from './PricingManagement'
@@ -6,9 +15,22 @@ import NumberFormatSettings from './NumberFormatSettings'
 import ShopProfileSettings from './ShopProfileSettings'
 import LedgerMaintenanceSettings from './LedgerMaintenanceSettings'
 import UserManagement from './UserManagement'
-import { Users, Package, Tags, Hash, Store, ShieldCheck, RefreshCw } from 'lucide-react'
+
+const SETTINGS_SECTIONS = [
+  { value: 'shop', label: 'Shop Profile', icon: Store },
+  { value: 'users', label: 'Users', icon: ShieldCheck },
+  { value: 'customers', label: 'Customers', icon: Users },
+  { value: 'products', label: 'Products', icon: Package },
+  { value: 'pricing', label: 'Custom Pricing', icon: Tags },
+  { value: 'numberformat', label: 'Number Format', icon: Hash },
+  { value: 'ledger', label: 'Ledger', icon: RefreshCw },
+] as const
+
+type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['value']
 
 export default function SettingsPage() {
+  const [section, setSection] = useState<SettingsSection>('shop')
+
   return (
     <div className="space-y-6">
       <div>
@@ -18,59 +40,37 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="shop">
-        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-7 lg:w-auto lg:inline-grid">
-          <TabsTrigger value="shop" className="flex items-center gap-2">
-            <Store className="h-4 w-4" />
-            <span className="hidden sm:inline">Shop Profile</span>
-          </TabsTrigger>
-          <TabsTrigger value="users" className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4" />
-            <span className="hidden sm:inline">Users</span>
-          </TabsTrigger>
-          <TabsTrigger value="customers" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            <span className="hidden sm:inline">Customers</span>
-          </TabsTrigger>
-          <TabsTrigger value="products" className="flex items-center gap-2">
-            <Package className="h-4 w-4" />
-            <span className="hidden sm:inline">Products</span>
-          </TabsTrigger>
-          <TabsTrigger value="pricing" className="flex items-center gap-2">
-            <Tags className="h-4 w-4" />
-            <span className="hidden sm:inline">Custom Pricing</span>
-          </TabsTrigger>
-          <TabsTrigger value="numberformat" className="flex items-center gap-2">
-            <Hash className="h-4 w-4" />
-            <span className="hidden sm:inline">Number Format</span>
-          </TabsTrigger>
-          <TabsTrigger value="ledger" className="flex items-center gap-2">
-            <RefreshCw className="h-4 w-4" />
-            <span className="hidden sm:inline">Ledger</span>
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="shop" className="mt-6">
-          <ShopProfileSettings />
-        </TabsContent>
-        <TabsContent value="users" className="mt-6">
-          <UserManagement />
-        </TabsContent>
-        <TabsContent value="customers" className="mt-6">
-          <CustomerManagement />
-        </TabsContent>
-        <TabsContent value="products" className="mt-6">
-          <ProductManagement />
-        </TabsContent>
-        <TabsContent value="pricing" className="mt-6">
-          <PricingManagement />
-        </TabsContent>
-        <TabsContent value="numberformat" className="mt-6">
-          <NumberFormatSettings />
-        </TabsContent>
-        <TabsContent value="ledger" className="mt-6">
-          <LedgerMaintenanceSettings />
-        </TabsContent>
-      </Tabs>
+      <div className="space-y-2 max-w-md">
+        <Label htmlFor="settings-section">Settings section</Label>
+        <Select value={section} onValueChange={(v) => setSection(v as SettingsSection)}>
+          <SelectTrigger id="settings-section" className="h-11">
+            <SelectValue placeholder="Select section" />
+          </SelectTrigger>
+          <SelectContent>
+            {SETTINGS_SECTIONS.map((item) => {
+              const Icon = item.icon
+              return (
+                <SelectItem key={item.value} value={item.value}>
+                  <span className="flex items-center gap-2">
+                    <Icon className="h-4 w-4 shrink-0 text-gray-500" />
+                    {item.label}
+                  </span>
+                </SelectItem>
+              )
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="mt-2">
+        {section === 'shop' && <ShopProfileSettings />}
+        {section === 'users' && <UserManagement />}
+        {section === 'customers' && <CustomerManagement />}
+        {section === 'products' && <ProductManagement />}
+        {section === 'pricing' && <PricingManagement />}
+        {section === 'numberformat' && <NumberFormatSettings />}
+        {section === 'ledger' && <LedgerMaintenanceSettings />}
+      </div>
     </div>
   )
 }
