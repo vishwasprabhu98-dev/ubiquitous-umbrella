@@ -226,6 +226,56 @@ export function periodMetricsFromRows(rows: LedgerRow[]): {
   return { billed, paid, closing: rows[0]?.balance ?? 0 }
 }
 
+/** Apply in-month billed/paid onto existing-customer ledger entries (Due stays all-time outstanding). */
+export function applyMonthActivityToExistingEntries(
+  entries: CustomerLedgerEntry[],
+  monthBills: Bill[],
+  monthTransactions: Transaction[],
+  monthPurchases: PurchaseInvoice[] = []
+): CustomerLedgerEntry[] {
+  const billedByCustomer = new Map<string, number>()
+  const paidByCustomer = new Map<string, number>()
+
+  for (const bill of monthBills) {
+    if (!bill.customerId) continue
+    billedByCustomer.set(
+      bill.customerId,
+      (billedByCustomer.get(bill.customerId) ?? 0) + (bill.grandTotal ?? 0)
+    )
+  }
+
+  for (const tx of monthTransactions) {
+    if (!tx.customerId || (tx.amount ?? 0) <= 0) continue
+    if (tx.purchaseId) continue
+    // Ledger settlements + bill payments dated in this month
+    if (tx.billId === LEDGER_PAYMENT_REF || tx.billId) {
+      paidByCustomer.set(
+        tx.customerId,
+        (paidByCustomer.get(tx.customerId) ?? 0) + tx.amount
+      )
+    }
+  }
+
+  for (const purchase of monthPurchases) {
+    if (purchase.status !== 'SAVED' || !purchase.customerId) continue
+    if (!(purchase.vendorType === 'customer' || purchase.customerId)) continue
+    // Purchase from customer = credit (same as ledger period metrics)
+    paidByCustomer.set(
+      purchase.customerId,
+      (paidByCustomer.get(purchase.customerId) ?? 0) + (purchase.grandTotal ?? 0)
+    )
+  }
+
+  return entries.map((entry) => {
+    if (!entry.isRegistered || !entry.customerId) return entry
+    return {
+      ...entry,
+      totalBilled: billedByCustomer.get(entry.customerId) ?? 0,
+      totalPaid: paidByCustomer.get(entry.customerId) ?? 0,
+    }
+  })
+}
+
 export function buildVendorPurchaseRows(
   purchase: PurchaseInvoice,
   transactions: Transaction[]

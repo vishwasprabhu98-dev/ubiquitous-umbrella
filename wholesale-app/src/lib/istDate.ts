@@ -50,6 +50,24 @@ export function previousMonthKey(monthKey: string): string | null {
   return formatMonthKey(parsed.year, parsed.month - 1)
 }
 
+/** Inclusive window of the last `monthCount` IST months ending at `endMonthKey` (default: current). */
+export function istRollingMonthBounds(
+  monthCount: number,
+  endMonthKey: string = currentIstMonthKey()
+): { from: Date; to: Date } | null {
+  if (monthCount < 1) return null
+  let startKey = endMonthKey
+  for (let i = 1; i < monthCount; i++) {
+    const prev = previousMonthKey(startKey)
+    if (!prev) break
+    startKey = prev
+  }
+  const fromBounds = istMonthBounds(startKey)
+  const toBounds = istMonthBounds(endMonthKey)
+  if (!fromBounds || !toBounds) return null
+  return { from: fromBounds.from, to: toBounds.to }
+}
+
 /** First/last IST instants for a YYYY-MM key (for Firestore range queries). */
 export function istMonthBounds(monthKey: string): { from: Date; to: Date } | null {
   const parsed = parseMonthKey(monthKey)

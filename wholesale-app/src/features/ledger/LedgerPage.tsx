@@ -55,7 +55,7 @@ import {
   buildNewCustomerLedger,
   buildVendorLedger,
   matchesLedgerSearch,
-  periodMetricsFromRows,
+  applyMonthActivityToExistingEntries,
   type CustomerLedgerEntry,
   type LedgerRow,
 } from '@/lib/ledgerBuild'
@@ -68,9 +68,23 @@ import {
   MONTH_LABELS,
   currentIstMonthKey,
   formatMonthKey,
+  istDayEnd,
+  istDayStart,
   istMonthBounds,
+  istRollingMonthBounds,
   parseMonthKey,
+  toIstDateString,
+  todayIst,
 } from '@/lib/istDate'
+
+function defaultNewCustomerDateRange(): { from: string; to: string } {
+  const bounds = istRollingMonthBounds(3)
+  if (!bounds) {
+    const today = todayIst()
+    return { from: today, to: today }
+  }
+  return { from: toIstDateString(bounds.from), to: toIstDateString(bounds.to) }
+}
 import InvoiceView from '@/features/billing/InvoiceView'
 import PurchaseInvoiceView from '@/features/purchases/PurchaseInvoiceView'
 import type { Bill, PaymentMode, PurchaseInvoice } from '@/types'
@@ -353,17 +367,13 @@ function LedgerCard({
     retry: 1,
   })
 
-  const rows = detail?.ledgerRows ?? entry.ledgerRows
-  const usePeriodMetrics = Boolean(monthKey && detail && entry.isRegistered)
-  const periodMetrics = usePeriodMetrics ? periodMetricsFromRows(rows) : null
-
-  const billedAmount = periodMetrics?.billed ?? entry.totalBilled
-  const paidAmount = periodMetrics?.paid ?? entry.totalPaid
-  const ledgerBalance = periodMetrics?.closing ?? rows[0]?.balance ?? entry.outstanding
-  const dueAmount = usePeriodMetrics ? ledgerBalance : entry.outstanding
+  const billedAmount = entry.totalBilled
+  const paidAmount = entry.totalPaid
+  const dueAmount = entry.outstanding
   const hasOutstanding = dueAmount > 0
   const hasCredit = dueAmount < -0.001
   const creditAmount = hasCredit ? Math.abs(dueAmount) : 0
+  const rows = detail?.ledgerRows ?? entry.ledgerRows
 
   const ensureDetail = async () => {
     const cached = queryClient.getQueryData(
@@ -443,34 +453,34 @@ function LedgerCard({
                   'text-lg font-bold',
                   dueAmount > 0
                     ? 'text-red-600 dark:text-red-400'
-                    : hasCredit || ledgerBalance < 0
+                    : hasCredit
                       ? 'text-green-600 dark:text-green-400'
                       : 'text-gray-500'
                 )}
               >
-                ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
+                ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : 0)}
               </div>
               <div className="text-xs text-gray-400">
-                {dueAmount > 0 ? 'outstanding' : hasCredit || ledgerBalance < 0 ? 'excess credit' : 'cleared'}
+                {dueAmount > 0 ? 'outstanding' : hasCredit ? 'excess credit' : 'cleared'}
               </div>
             </div>
           </div>
 
           <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
             <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
-              <div className="text-gray-400 mb-0.5">Billed</div>
-              <div className="font-semibold text-gray-800 dark:text-gray-200">₹{fmt(billedAmount)}</div>
+            <div className="text-gray-400 mb-0.5">Billed</div>
+            <div className="font-semibold text-gray-800 dark:text-gray-200">₹{fmt(billedAmount)}</div>
+          </div>
+          <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
+            <div className="text-gray-400 mb-0.5">Paid</div>
+            <div className="font-semibold text-green-700 dark:text-green-400">₹{fmt(paidAmount)}</div>
+          </div>
+          <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
+            <div className="text-gray-400 mb-0.5">{hasCredit || dueAmount < 0 ? 'Excess' : 'Due'}</div>
+            <div className={cn('font-semibold', dueAmount > 0 ? 'text-red-600 dark:text-red-400' : hasCredit ? 'text-green-600 dark:text-green-400' : 'text-gray-500')}>
+              ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : 0)}
             </div>
-            <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
-              <div className="text-gray-400 mb-0.5">Paid</div>
-              <div className="font-semibold text-green-700 dark:text-green-400">₹{fmt(paidAmount)}</div>
-            </div>
-            <div className="rounded-lg bg-gray-50 dark:bg-[#1e2330]/60 px-3 py-2">
-              <div className="text-gray-400 mb-0.5">{hasCredit || (ledgerBalance < 0 && dueAmount <= 0) ? 'Excess' : 'Due'}</div>
-              <div className={cn('font-semibold', dueAmount > 0 ? 'text-red-600 dark:text-red-400' : hasCredit || ledgerBalance < 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500')}>
-                ₹{fmt(dueAmount > 0 ? dueAmount : hasCredit ? creditAmount : Math.abs(ledgerBalance))}
-              </div>
-            </div>
+          </div>
           </div>
         </button>
 
@@ -594,6 +604,8 @@ export default function LedgerPage() {
   const [search, setSearch] = useState('')
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('pending')
   const [monthKey, setMonthKey] = useState(() => currentIstMonthKey())
+  const [newFromDate, setNewFromDate] = useState(() => defaultNewCustomerDateRange().from)
+  const [newToDate, setNewToDate] = useState(() => defaultNewCustomerDateRange().to)
   const [page, setPage] = useState(1)
   const [rangeCursor, setRangeCursor] = useState(RANGE_PAGE_SIZE)
   const [periodDialogOpen, setPeriodDialogOpen] = useState(false)
@@ -640,7 +652,70 @@ export default function LedgerPage() {
       return billRepository.getByDateRange(bounds.from, bounds.to)
     },
     staleTime: 30_000,
-    enabled: view === 'new',
+    enabled: view === 'existing',
+  })
+
+  const newBounds = useMemo(
+    () => ({ from: istDayStart(newFromDate), to: istDayEnd(newToDate) }),
+    [newFromDate, newToDate]
+  )
+
+  /** New customers — pending bills for selected range (default: last 3 months). */
+  const { data: newPendingBills = [], isLoading: newPendingLoading } = useQuery({
+    queryKey: ['bills', 'new-customers', 'pending', newFromDate, newToDate],
+    queryFn: () => billRepository.getPendingByDateRange(newBounds.from, newBounds.to),
+    staleTime: 30_000,
+  })
+
+  /** Paid walk-in bills — fetched only when Paid / All is selected on New Customers. */
+  const fetchNewPaid =
+    view === 'new' && (paymentFilter === 'paid' || paymentFilter === 'all')
+  const { data: newPaidBills = [], isLoading: newPaidLoading } = useQuery({
+    queryKey: ['bills', 'new-customers', 'paid', newFromDate, newToDate],
+    queryFn: () => billRepository.getPaidByDateRange(newBounds.from, newBounds.to),
+    staleTime: 30_000,
+    enabled: fetchNewPaid,
+  })
+
+  const newCustomerBills = useMemo(() => {
+    if (paymentFilter === 'paid') return newPaidBills
+    if (paymentFilter === 'all') {
+      const seen = new Set<string>()
+      const merged: typeof newPendingBills = []
+      for (const b of [...newPendingBills, ...newPaidBills]) {
+        if (seen.has(b.billId)) continue
+        seen.add(b.billId)
+        merged.push(b)
+      }
+      return merged
+    }
+    // pending (default) and credit — only pending set
+    return newPendingBills
+  }, [paymentFilter, newPendingBills, newPaidBills])
+
+  const { data: monthTransactions = [], isLoading: monthTxLoading } = useQuery({
+    queryKey: ['transactions', 'month', monthKey],
+    queryFn: async () => {
+      const bounds = istMonthBounds(monthKey)
+      if (!bounds) return []
+      return transactionRepository.getByDateRange(bounds.from, bounds.to)
+    },
+    staleTime: 30_000,
+    enabled: view === 'existing',
+  })
+
+  const { data: monthCustomerPurchases = [], isLoading: monthPurchasesLoading } = useQuery({
+    queryKey: ['purchases', 'month-customers', monthKey],
+    queryFn: async () => {
+      const bounds = istMonthBounds(monthKey)
+      if (!bounds) return []
+      const all = await purchaseRepository.getByDateRange(bounds.from, bounds.to)
+      return all.filter(
+        (p) => p.status === 'SAVED' && !!p.customerId && (p.vendorType === 'customer' || !!p.customerId)
+      )
+    },
+    staleTime: 30_000,
+    enabled: view === 'existing',
   })
 
   const { data: rangePurchases = [], isLoading: rangePurchasesLoading } = useQuery({
@@ -662,7 +737,11 @@ export default function LedgerPage() {
 
   const isLoading =
     customersLoading ||
-    (view === 'existing' ? balancesLoading : view === 'new' ? rangeBillsLoading : rangePurchasesLoading)
+    (view === 'existing'
+      ? balancesLoading || rangeBillsLoading || monthTxLoading || monthPurchasesLoading
+      : view === 'new'
+        ? newPendingLoading || (fetchNewPaid && newPaidLoading)
+        : rangePurchasesLoading)
 
   const ledgerPayMutation = useMutation({
     mutationFn: async ({ entry, amount, mode, remarks }: {
@@ -786,13 +865,30 @@ export default function LedgerPage() {
 
   const ledger = useMemo(() => {
     if (view === 'existing') {
-      return buildExistingLedgerFromBalances(customers, balances, monthKey)
+      const base = buildExistingLedgerFromBalances(customers, balances, monthKey)
+      return applyMonthActivityToExistingEntries(
+        base,
+        rangeBills,
+        monthTransactions,
+        monthCustomerPurchases
+      )
     }
     if (view === 'vendors') {
       return buildVendorLedger(rangePurchases)
     }
-    return buildNewCustomerLedger(rangeBills, registeredIds)
-  }, [view, customers, balances, rangeBills, rangePurchases, registeredIds, monthKey])
+    return buildNewCustomerLedger(newCustomerBills, registeredIds)
+  }, [
+    view,
+    customers,
+    balances,
+    rangeBills,
+    rangePurchases,
+    registeredIds,
+    monthKey,
+    monthTransactions,
+    monthCustomerPurchases,
+    newCustomerBills,
+  ])
 
   const filtered = useMemo(() => {
     let result = ledger
@@ -819,7 +915,7 @@ export default function LedgerPage() {
   useEffect(() => {
     setPage(1)
     setRangeCursor(RANGE_PAGE_SIZE)
-  }, [view, search, paymentFilter, monthKey])
+  }, [view, search, paymentFilter, monthKey, newFromDate, newToDate])
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
@@ -841,7 +937,7 @@ export default function LedgerPage() {
   )
 
   const existingCount = balances.length
-  const newCount = rangeBills.filter((b) => !b.customerId || !registeredIds.has(b.customerId)).length
+  const newCount = newPendingBills.filter((b) => !b.customerId || !registeredIds.has(b.customerId)).length
   const vendorsCount = rangePurchases.length
   const pendingCount = useMemo(() => ledger.filter((e) => e.outstanding > 0.001).length, [ledger])
   const paidCount = useMemo(() => ledger.filter((e) => Math.abs(e.outstanding) < 0.001).length, [ledger])
@@ -917,6 +1013,12 @@ export default function LedgerPage() {
 
   const resetPeriod = () => {
     setMonthKey(currentIstMonthKey())
+  }
+
+  const resetNewDateRange = () => {
+    const range = defaultNewCustomerDateRange()
+    setNewFromDate(range.from)
+    setNewToDate(range.to)
   }
 
   const switchView = (next: LedgerView) => {
@@ -1085,58 +1187,96 @@ export default function LedgerPage() {
         </div>
       </div>
 
-      <div className="sm:hidden">
-        <Button type="button" variant="outline" className="w-full justify-start" onClick={() => setPeriodDialogOpen(true)}>
-          <Calendar className="h-4 w-4" />
-          {view === 'existing' ? 'Activity period' : view === 'vendors' ? 'Purchase month' : 'Bill month'}: {MONTH_LABELS[(periodParts?.month ?? 1) - 1]} {periodParts?.year ?? new Date().getFullYear()}
-        </Button>
-      </div>
+      {view === 'new' ? (
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3 rounded-xl border border-gray-200 dark:border-[#2a3040] bg-white dark:bg-[#252d3d]/60 p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200 shrink-0">
+            <Calendar className="h-4 w-4 text-gray-400" />
+            Bill period
+            <span className="text-xs font-normal text-gray-400">(IST)</span>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 flex-1">
+            <div className="space-y-1 flex-1 max-w-xs">
+              <Label className="text-xs text-gray-500">From</Label>
+              <Input
+                type="date"
+                value={newFromDate}
+                max={newToDate}
+                onChange={(e) => setNewFromDate(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1 flex-1 max-w-xs">
+              <Label className="text-xs text-gray-500">To</Label>
+              <Input
+                type="date"
+                value={newToDate}
+                min={newFromDate}
+                onChange={(e) => setNewToDate(e.target.value)}
+                className="h-9"
+              />
+            </div>
+          </div>
+          <Button type="button" variant="ghost" size="sm" className="shrink-0 text-gray-500" onClick={resetNewDateRange}>
+            <X className="h-4 w-4" />
+            Last 3 months
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="sm:hidden">
+            <Button type="button" variant="outline" className="w-full justify-start" onClick={() => setPeriodDialogOpen(true)}>
+              <Calendar className="h-4 w-4" />
+              {view === 'existing' ? 'Activity period' : 'Purchase month'}: {MONTH_LABELS[(periodParts?.month ?? 1) - 1]} {periodParts?.year ?? new Date().getFullYear()}
+            </Button>
+          </div>
 
-      <div className="hidden sm:flex flex-col sm:flex-row sm:items-end gap-3 rounded-xl border border-gray-200 dark:border-[#2a3040] bg-white dark:bg-[#252d3d]/60 p-4">
-        <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200 shrink-0">
-          <Calendar className="h-4 w-4 text-gray-400" />
-          {view === 'existing' ? 'Activity period' : view === 'vendors' ? 'Purchase month' : 'Bill month'}
-          <span className="text-xs font-normal text-gray-400">(IST)</span>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-3 flex-1">
-          <div className="space-y-1 flex-1 max-w-xs">
-            <Label className="text-xs text-gray-500">Month</Label>
-            <select
-              value={periodParts?.month ?? 1}
-              onChange={(e) => {
-                const m = Number(e.target.value)
-                const y = periodParts?.year ?? new Date().getFullYear()
-                setMonthKey(formatMonthKey(y, m))
-              }}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              {MONTH_LABELS.map((label, i) => (
-                <option key={label} value={i + 1}>{label}</option>
-              ))}
-            </select>
+          <div className="hidden sm:flex flex-col sm:flex-row sm:items-end gap-3 rounded-xl border border-gray-200 dark:border-[#2a3040] bg-white dark:bg-[#252d3d]/60 p-4">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200 shrink-0">
+              <Calendar className="h-4 w-4 text-gray-400" />
+              {view === 'existing' ? 'Activity period' : 'Purchase month'}
+              <span className="text-xs font-normal text-gray-400">(IST)</span>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 flex-1">
+              <div className="space-y-1 flex-1 max-w-xs">
+                <Label className="text-xs text-gray-500">Month</Label>
+                <select
+                  value={periodParts?.month ?? 1}
+                  onChange={(e) => {
+                    const m = Number(e.target.value)
+                    const y = periodParts?.year ?? new Date().getFullYear()
+                    setMonthKey(formatMonthKey(y, m))
+                  }}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {MONTH_LABELS.map((label, i) => (
+                    <option key={label} value={i + 1}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1 flex-1 max-w-xs">
+                <Label className="text-xs text-gray-500">Year</Label>
+                <select
+                  value={periodParts?.year ?? new Date().getFullYear()}
+                  onChange={(e) => {
+                    const y = Number(e.target.value)
+                    const m = periodParts?.month ?? 1
+                    setMonthKey(formatMonthKey(y, m))
+                  }}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <Button type="button" variant="ghost" size="sm" className="shrink-0 text-gray-500" onClick={resetPeriod}>
+              <X className="h-4 w-4" />
+              This month
+            </Button>
           </div>
-          <div className="space-y-1 flex-1 max-w-xs">
-            <Label className="text-xs text-gray-500">Year</Label>
-            <select
-              value={periodParts?.year ?? new Date().getFullYear()}
-              onChange={(e) => {
-                const y = Number(e.target.value)
-                const m = periodParts?.month ?? 1
-                setMonthKey(formatMonthKey(y, m))
-              }}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              {yearOptions.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <Button type="button" variant="ghost" size="sm" className="shrink-0 text-gray-500" onClick={resetPeriod}>
-          <X className="h-4 w-4" />
-          This month
-        </Button>
-      </div>
+        </>
+      )}
       {view === 'existing' && (
         <p className="text-xs text-gray-400 -mt-3">
           Customers with outstanding dues always appear. Expanded ledger loads only this month’s rows;
@@ -1148,7 +1288,7 @@ export default function LedgerPage() {
         <DialogContent className="sm:hidden max-w-sm">
           <DialogHeader>
             <DialogTitle>
-              {view === 'existing' ? 'Activity period' : view === 'vendors' ? 'Purchase month' : 'Bill month'}
+              {view === 'existing' ? 'Activity period' : 'Purchase month'}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">

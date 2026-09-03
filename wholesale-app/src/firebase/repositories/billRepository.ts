@@ -98,6 +98,46 @@ export const billRepository = {
     return snapshot.docs.map((d) => ({ ...d.data(), billId: d.id }) as Bill)
   },
 
+  /** Unpaid / partial bills in range. Falls back to range fetch + client filter if index missing. */
+  async getPendingByDateRange(from: Date, to: Date): Promise<Bill[]> {
+    try {
+      const q = query(
+        billsRef(),
+        where('createdAt', '>=', Timestamp.fromDate(from)),
+        where('createdAt', '<=', Timestamp.fromDate(to)),
+        where('remainingAmount', '>', 0),
+        orderBy('createdAt', 'desc')
+      )
+      const snapshot = await getDocs(q)
+      return snapshot.docs.map((d) => ({ ...d.data(), billId: d.id }) as Bill)
+    } catch (err) {
+      const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
+      if (code !== 'failed-precondition') throw err
+      const all = await this.getByDateRange(from, to)
+      return all.filter((b) => (b.remainingAmount ?? 0) > 0.001)
+    }
+  },
+
+  /** Fully paid bills in range. Falls back to range fetch + client filter if index missing. */
+  async getPaidByDateRange(from: Date, to: Date): Promise<Bill[]> {
+    try {
+      const q = query(
+        billsRef(),
+        where('createdAt', '>=', Timestamp.fromDate(from)),
+        where('createdAt', '<=', Timestamp.fromDate(to)),
+        where('paymentStatus', '==', 'PAID'),
+        orderBy('createdAt', 'desc')
+      )
+      const snapshot = await getDocs(q)
+      return snapshot.docs.map((d) => ({ ...d.data(), billId: d.id }) as Bill)
+    } catch (err) {
+      const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
+      if (code !== 'failed-precondition') throw err
+      const all = await this.getByDateRange(from, to)
+      return all.filter((b) => (b.remainingAmount ?? 0) <= 0.001 || b.paymentStatus === 'PAID')
+    }
+  },
+
   async getByDateRangePage(
     from: Date,
     to: Date,
