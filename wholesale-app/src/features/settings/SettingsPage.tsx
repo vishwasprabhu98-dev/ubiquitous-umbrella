@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Users, Package, Tags, Hash, Store, ShieldCheck, RefreshCw } from 'lucide-react'
+import { Users, Package, Tags, Hash, Store, ShieldCheck, RefreshCw, Images } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -10,6 +10,7 @@ import {
 import { Label } from '@/components/ui/label'
 import CustomerManagement from './CustomerManagement'
 import ProductManagement from './ProductManagement'
+import CatalogProductManagement from './CatalogProductManagement'
 import PricingManagement from './PricingManagement'
 import NumberFormatSettings from './NumberFormatSettings'
 import ShopProfileSettings from './ShopProfileSettings'
@@ -21,6 +22,7 @@ const SETTINGS_SECTIONS = [
   { value: 'users', label: 'Users', icon: ShieldCheck },
   { value: 'customers', label: 'Customers', icon: Users },
   { value: 'products', label: 'Products', icon: Package },
+  { value: 'catalog', label: 'Catalog Products', icon: Images },
   { value: 'pricing', label: 'Custom Pricing', icon: Tags },
   { value: 'numberformat', label: 'Number Format', icon: Hash },
   { value: 'ledger', label: 'Ledger', icon: RefreshCw },
@@ -36,7 +38,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
         <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-          Manage shop profile, users, customers, products, pricing, number formats, and ledger maintenance
+          Manage shop profile, users, customers, products, catalog, pricing, number formats, and ledger maintenance
         </p>
       </div>
 
@@ -67,6 +69,7 @@ export default function SettingsPage() {
         {section === 'users' && <UserManagement />}
         {section === 'customers' && <CustomerManagement />}
         {section === 'products' && <ProductManagement />}
+        {section === 'catalog' && <CatalogProductManagement />}
         {section === 'pricing' && <PricingManagement />}
         {section === 'numberformat' && <NumberFormatSettings />}
         {section === 'ledger' && <LedgerMaintenanceSettings />}

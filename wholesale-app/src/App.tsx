@@ -8,6 +8,7 @@ import { useShopName } from '@/hooks/useShopName'
 import AppLayout from '@/components/layout/AppLayout'
 import ProtectedRoute from '@/routes/ProtectedRoute'
 import LoginPage from '@/features/auth/LoginPage'
+import CatalogPage from '@/features/catalog/CatalogPage'
 import DashboardPage from '@/features/dashboard/DashboardPage'
 import BillingPage from '@/features/billing/BillingPage'
 import OrdersPage from '@/features/orders/OrdersPage'
@@ -52,6 +53,7 @@ export default function App() {
         <ShopNameInitializer />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/catalog" element={<CatalogPage />} />
           <Route
             path="/"
             element={

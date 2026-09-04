@@ -72,6 +72,36 @@ export interface Product {
 
 export type ProductFormData = Omit<Product, 'productId' | 'createdAt'>
 
+// ─── Public Catalog Product ────────────────────────────────────────────────
+
+export interface CatalogProductSize {
+  label: string
+  originalPrice: number
+  discountedPrice: number
+}
+
+/** Storefront catalog item (separate from billing inventory products). */
+export interface CatalogProduct {
+  catalogProductId: string
+  name: string
+  description: string
+  /** Price unit, e.g. KG, Piece. */
+  unit: string
+  /** Used when `sizes` is empty; otherwise typically mirrors the first/default size. */
+  originalPrice: number
+  discountedPrice: number
+  /** Optional size variants with their own prices (Small / Medium / Large, etc.). */
+  sizes?: CatalogProductSize[]
+  /** Google Drive share / direct links; converted for display at render time. */
+  imageUrls: string[]
+  /** Optional badge on the card, e.g. "Top item". */
+  badge?: string
+  sortOrder?: number
+  createdAt: Timestamp
+}
+
+export type CatalogProductFormData = Omit<CatalogProduct, 'catalogProductId' | 'createdAt'>
+
 // ─── Customer Product Pricing ──────────────────────────────────────────────
 
 export interface CustomerProductPricing {

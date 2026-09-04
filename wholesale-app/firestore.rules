@@ -39,6 +39,17 @@ service cloud.firestore {
       allow read, write: if isFinanceOrAdmin();
     }
 
+    /** Public storefront catalog — anyone can read; only admins manage. */
+    match /catalogProducts/{productId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    /** Public shop name/details for the storefront catalog header. */
+    match /settings/shopProfile {
+      allow read: if true;
+    }
+
     match /{document=**} {
       allow read, write: if isSignedIn() && !isPurchasesPath();
     }
