@@ -25,9 +25,10 @@ import {
   Share2,
   ShoppingBag,
   Download,
+  MessageCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -49,7 +50,7 @@ import {
   customerBalanceRepository,
   LEDGER_PAYMENT_REF,
 } from '@/firebase/repositories/customerBalanceRepository'
-import { sharePdfBlob, downloadPdfBlob } from '@/lib/sharePdf'
+import { sharePdfBlob, downloadPdfBlob, shareElementAsImage } from '@/lib/sharePdf'
 import { createLedgerPdfBlob, type LedgerPdfRow } from '@/lib/ledgerPdf'
 import {
   buildExistingLedgerFromBalances,
@@ -623,6 +624,13 @@ export default function LedgerPage() {
 
   const [viewBill, setViewBill] = useState<Bill | null>(null)
   const [viewPurchase, setViewPurchase] = useState<PurchaseInvoice | null>(null)
+  const [sharingWhatsApp, setSharingWhatsApp] = useState(false)
+
+  const { data: viewLedgerBalance } = useQuery({
+    queryKey: ['customerBalances', viewBill?.customerId],
+    queryFn: () => customerBalanceRepository.get(viewBill!.customerId!),
+    enabled: !!viewBill?.customerId,
+  })
 
   const periodParts = useMemo(() => parseMonthKey(monthKey), [monthKey])
   const yearOptions = useMemo(() => {
@@ -1681,11 +1689,90 @@ export default function LedgerPage() {
 
       {viewBill && (
         <Dialog open={!!viewBill} onOpenChange={() => setViewBill(null)}>
-          <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto">
-            <DialogHeader>
+          <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto print:shadow-none">
+            <DialogHeader className="print:hidden">
               <DialogTitle>Invoice — {viewBill.billNumber}</DialogTitle>
             </DialogHeader>
-            <InvoiceView bill={viewBill} />
+            <InvoiceView
+              bill={viewBill}
+              ledgerOutstanding={
+                viewBill.customerId ? (viewLedgerBalance?.outstanding ?? null) : null
+              }
+            />
+            <DialogFooter className="print:hidden">
+              <Button
+                variant="outline"
+                disabled={sharingWhatsApp}
+                onClick={async () => {
+                  setSharingWhatsApp(true)
+                  try {
+                    let outstandingShown: number | null = null
+                    if (viewBill.customerId) {
+                      const balance = await customerBalanceRepository.get(viewBill.customerId)
+                      outstandingShown = balance?.outstanding ?? null
+                      queryClient.setQueryData(
+                        ['customerBalances', viewBill.customerId],
+                        balance
+                      )
+                      await new Promise<void>((resolve) => {
+                        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+                      })
+                    }
+                    const balanceDue =
+                      outstandingShown != null
+                        ? outstandingShown
+                        : viewBill.movedToLedger
+                          ? 0
+                          : viewBill.remainingAmount
+                    const shareText = [
+                      `Bill Amount: ${formatCurrency(viewBill.grandTotal)}`,
+                      `Balance Due: ${formatCurrency(balanceDue)}`,
+                    ].join('\n')
+                    await shareElementAsImage({
+                      elementId: 'invoice-print',
+                      filename: `invoice-${viewBill.billNumber}.jpg`,
+                      title: `Invoice ${viewBill.billNumber}`,
+                      text: shareText,
+                      phone: viewBill.customerInfo?.phone,
+                      onError: (msg) => toast.error(msg),
+                      onFallback: (msg) => toast.info(msg),
+                    })
+                    logActivity({
+                      type: 'bill.shared_whatsapp',
+                      description: `Shared bill ${viewBill.billNumber} on WhatsApp for ${viewBill.customerInfo?.name || 'customer'}${
+                        outstandingShown != null
+                          ? ` (ledger balance ₹${outstandingShown})`
+                          : ''
+                      }`,
+                      entityType: 'bill',
+                      entityId: viewBill.billId,
+                      entityLabel: viewBill.billNumber,
+                      customerId: viewBill.customerId,
+                      customerName: viewBill.customerInfo?.name,
+                      meta: {
+                        outstandingShown,
+                        phone: viewBill.customerInfo?.phone,
+                        source: 'ledger',
+                      },
+                    })
+                    setViewBill(null)
+                  } catch (err) {
+                    if (err instanceof Error && err.name !== 'AbortError') {
+                      toast.error('Failed to share invoice')
+                    }
+                  } finally {
+                    setSharingWhatsApp(false)
+                  }
+                }}
+              >
+                {sharingWhatsApp ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <MessageCircle className="h-4 w-4" />
+                )}
+                WhatsApp
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}

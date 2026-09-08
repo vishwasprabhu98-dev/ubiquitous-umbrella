@@ -1,21 +1,26 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, ShoppingCart, CreditCard } from 'lucide-react'
+import { ArrowRight, ShoppingCart, CreditCard, MessageCircle, Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
+import { toast } from 'sonner'
 import { billRepository } from '@/firebase/repositories/billRepository'
 import { orderRepository } from '@/firebase/repositories/orderRepository'
+import { customerBalanceRepository } from '@/firebase/repositories/customerBalanceRepository'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { addIstDays, todayIst } from '@/lib/istDate'
+import { shareElementAsImage } from '@/lib/sharePdf'
 import InvoiceView from '@/features/billing/InvoiceView'
 import OrderView from '@/features/orders/OrderView'
 import type { Bill, Order, TimeSlot } from '@/types'
@@ -136,6 +141,7 @@ function OrderSection({
 export default function DashboardPage() {
   const [viewOrder, setViewOrder] = useState<Order | null>(null)
   const [viewBill, setViewBill] = useState<Bill | null>(null)
+  const [sharingWhatsApp, setSharingWhatsApp] = useState(false)
 
   const { data: bills = [], isLoading: billsLoading } = useQuery({
     queryKey: ['bills'],
@@ -145,6 +151,12 @@ export default function DashboardPage() {
   const { data: orders = [], isLoading: ordersLoading } = useQuery({
     queryKey: ['orders'],
     queryFn: orderRepository.getAll,
+  })
+
+  const { data: viewLedgerBalance } = useQuery({
+    queryKey: ['customerBalances', viewBill?.customerId],
+    queryFn: () => customerBalanceRepository.get(viewBill!.customerId!),
+    enabled: !!viewBill?.customerId,
   })
 
   const { todayOrders, tomorrowOrders, laterOrders, today } = useMemo(() => {
@@ -345,22 +357,130 @@ export default function DashboardPage() {
 
       {viewOrder && (
         <Dialog open={!!viewOrder} onOpenChange={() => setViewOrder(null)}>
-          <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto">
-            <DialogHeader>
+          <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto print:shadow-none">
+            <DialogHeader className="print:hidden">
               <DialogTitle>Order {viewOrder.orderNumber}</DialogTitle>
             </DialogHeader>
             <OrderView order={viewOrder} />
+            <DialogFooter className="print:hidden">
+              <Button
+                variant="outline"
+                disabled={sharingWhatsApp}
+                onClick={async () => {
+                  setSharingWhatsApp(true)
+                  try {
+                    await shareElementAsImage({
+                      elementId: 'order-print',
+                      filename: `order-${viewOrder.orderNumber}.jpg`,
+                      title: `Order ${viewOrder.orderNumber}`,
+                      text: `Order ${viewOrder.orderNumber}`,
+                      phone: viewOrder.customerInfo?.phone,
+                      onError: (msg) => toast.error(msg),
+                      onFallback: (msg) => toast.info(msg),
+                    })
+                  } catch (err) {
+                    if (err instanceof Error && err.name !== 'AbortError') {
+                      toast.error('Failed to share order')
+                    }
+                  } finally {
+                    setSharingWhatsApp(false)
+                  }
+                }}
+              >
+                {sharingWhatsApp ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <MessageCircle className="h-4 w-4" />
+                )}
+                WhatsApp
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
 
       {viewBill && (
         <Dialog open={!!viewBill} onOpenChange={() => setViewBill(null)}>
-          <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto">
-            <DialogHeader>
+          <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto print:shadow-none">
+            <DialogHeader className="print:hidden">
               <DialogTitle>Invoice — {viewBill.billNumber}</DialogTitle>
             </DialogHeader>
-            <InvoiceView bill={viewBill} />
+            <InvoiceView
+              bill={viewBill}
+              ledgerOutstanding={
+                viewBill.customerId ? (viewLedgerBalance?.outstanding ?? null) : null
+              }
+            />
+            <DialogFooter className="print:hidden">
+              <Button
+                variant="outline"
+                disabled={sharingWhatsApp}
+                onClick={async () => {
+                  setSharingWhatsApp(true)
+                  try {
+                    let outstandingShown: number | null = null
+                    if (viewBill.customerId) {
+                      const balance = await customerBalanceRepository.get(viewBill.customerId)
+                      outstandingShown = balance?.outstanding ?? null
+                      await new Promise<void>((resolve) => {
+                        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+                      })
+                    }
+                    const balanceDue =
+                      outstandingShown != null
+                        ? outstandingShown
+                        : viewBill.movedToLedger
+                          ? 0
+                          : viewBill.remainingAmount
+                    const shareText = [
+                      `Bill Amount: ${formatCurrency(viewBill.grandTotal)}`,
+                      `Balance Due: ${formatCurrency(balanceDue)}`,
+                    ].join('\n')
+                    await shareElementAsImage({
+                      elementId: 'invoice-print',
+                      filename: `invoice-${viewBill.billNumber}.jpg`,
+                      title: `Invoice ${viewBill.billNumber}`,
+                      text: shareText,
+                      phone: viewBill.customerInfo?.phone,
+                      onError: (msg) => toast.error(msg),
+                      onFallback: (msg) => toast.info(msg),
+                    })
+                    logActivity({
+                      type: 'bill.shared_whatsapp',
+                      description: `Shared bill ${viewBill.billNumber} on WhatsApp for ${viewBill.customerInfo?.name || 'customer'}${
+                        outstandingShown != null
+                          ? ` (ledger balance ₹${outstandingShown})`
+                          : ''
+                      }`,
+                      entityType: 'bill',
+                      entityId: viewBill.billId,
+                      entityLabel: viewBill.billNumber,
+                      customerId: viewBill.customerId,
+                      customerName: viewBill.customerInfo?.name,
+                      meta: {
+                        outstandingShown,
+                        phone: viewBill.customerInfo?.phone,
+                        source: 'dashboard',
+                      },
+                    })
+                    setViewBill(null)
+                  } catch (err) {
+                    if (err instanceof Error && err.name !== 'AbortError') {
+                      toast.error('Failed to share invoice')
+                    }
+                  } finally {
+                    setSharingWhatsApp(false)
+                  }
+                }}
+              >
+                {sharingWhatsApp ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <MessageCircle className="h-4 w-4" />
+                )}
+                WhatsApp
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}

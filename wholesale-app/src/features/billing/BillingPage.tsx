@@ -97,6 +97,7 @@ function BillCard({
   onPayment,
   onMoveToLedger,
   onRemoveFromLedger,
+  ledgerActionPending = false,
 }: {
   bill: Bill
   onView: (b: Bill) => void
@@ -104,6 +105,7 @@ function BillCard({
   onPayment: (b: Bill) => void
   onMoveToLedger: (b: Bill) => void
   onRemoveFromLedger: (b: Bill) => void
+  ledgerActionPending?: boolean
 }) {
   const isPaid = bill.paymentStatus === 'PAID'
   const billDay = getBillDateString(bill)
@@ -191,9 +193,15 @@ function BillCard({
               variant="outline"
               size="sm"
               className="h-7 text-xs gap-1 border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-950"
+              disabled={ledgerActionPending}
               onClick={() => onMoveToLedger(bill)}
             >
-              <BookOpen className="h-3 w-3" /> Move to Ledger
+              {ledgerActionPending ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <BookOpen className="h-3 w-3" />
+              )}
+              Move to Ledger
             </Button>
           )}
           {bill.movedToLedger && (
@@ -201,9 +209,15 @@ function BillCard({
               variant="outline"
               size="sm"
               className="h-7 text-xs gap-1 border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900"
+              disabled={ledgerActionPending}
               onClick={() => onRemoveFromLedger(bill)}
             >
-              <Undo2 className="h-3 w-3" /> Remove from Ledger
+              {ledgerActionPending ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Undo2 className="h-3 w-3" />
+              )}
+              Remove from Ledger
             </Button>
           )}
         </div>
@@ -1041,7 +1055,13 @@ export default function BillingPage() {
             </p>
           )}
           <div className="grid gap-3">
-            {paginatedBills.map((bill) => (
+            {paginatedBills.map((bill) => {
+              const movingThis =
+                (moveToLedgerMutation.isPending &&
+                  moveToLedgerMutation.variables?.billId === bill.billId) ||
+                (removeFromLedgerMutation.isPending &&
+                  removeFromLedgerMutation.variables?.billId === bill.billId)
+              return (
               <BillCard
                 key={bill.billId}
                 bill={bill}
@@ -1050,8 +1070,10 @@ export default function BillingPage() {
                 onPayment={openPaymentDialog}
                 onMoveToLedger={(b) => moveToLedgerMutation.mutate(b)}
                 onRemoveFromLedger={(b) => removeFromLedgerMutation.mutate(b)}
+                ledgerActionPending={movingThis}
               />
-            ))}
+              )
+            })}
           </div>
           {totalBillPages > 1 && (
             <div className="flex items-center justify-between gap-3 pt-2">
@@ -1619,7 +1641,21 @@ export default function BillingPage() {
                   : null
               }
             />
-            <DialogFooter className="print:hidden">
+            <DialogFooter className="print:hidden flex-wrap gap-2">
+              {viewBill.paymentStatus !== 'PAID' && (
+                <Button
+                  variant="outline"
+                  disabled={printingReceipt || sharingPdf}
+                  onClick={() => {
+                    const bill = viewBill
+                    setViewBill(null)
+                    openEdit(bill)
+                  }}
+                >
+                  <Edit2 className="h-4 w-4" />
+                  Edit
+                </Button>
+              )}
               <Button
                 variant="outline"
                 disabled={printingReceipt || sharingPdf || shopProfileLoading}
@@ -1742,6 +1778,7 @@ export default function BillingPage() {
                         phone: viewBill.customerInfo?.phone,
                       },
                     })
+                    setViewBill(null)
                   } catch (err) {
                     if (err instanceof Error && err.name !== 'AbortError') {
                       toast.error('Failed to share invoice')

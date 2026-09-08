@@ -71,7 +71,7 @@ export default function InvoiceView({ bill, ledgerOutstanding = null }: InvoiceV
           {shopProfile?.email && <p className="pd-muted text-xs">{shopProfile.email}</p>}
         </div>
         <div className="text-right">
-          <h2 className="text-xl pd-bold pd-heading">TAX INVOICE</h2>
+          <h2 className="text-xl pd-bold pd-heading">INVOICE</h2>
           <p className="pd-mono pd-primary pd-semibold mt-1">{bill.billNumber}</p>
           <p className="pd-muted text-xs mt-1">
             Date: {invoiceDateLabel}
