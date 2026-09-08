@@ -42,7 +42,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 import { sharePdfBlob, shareElementAsImage } from '@/lib/sharePdf'
 import { createOrderPdfBlob } from '@/lib/orderPdf'
 import OrderView from './OrderView'
@@ -703,6 +703,41 @@ export default function OrdersPage() {
     })
   }, [orders, search, filterStatus, filterDateMode, filterSingle, filterFrom, filterTo])
 
+  const ordersByDate = useMemo(() => {
+    const today = todayIst()
+    const tomorrow = addIstDays(today, 1)
+    const groups: { dateKey: string; label: string; orders: Order[] }[] = []
+    const indexByKey = new Map<string, number>()
+
+    for (const order of filteredOrders) {
+      const dateKey =
+        order.orderDate ||
+        (order.createdAt?.toDate ? toIstDateString(order.createdAt.toDate()) : '') ||
+        'unknown'
+
+      let group = groups[indexByKey.get(dateKey) ?? -1]
+      if (!group) {
+        let label = 'No date'
+        if (dateKey && dateKey !== 'unknown') {
+          try {
+            const formatted = format(parseISO(dateKey), 'EEE, d MMM yyyy')
+            if (dateKey === today) label = `Today · ${formatted}`
+            else if (dateKey === tomorrow) label = `Tomorrow · ${formatted}`
+            else label = formatted
+          } catch {
+            label = dateKey
+          }
+        }
+        group = { dateKey, label, orders: [] }
+        indexByKey.set(dateKey, groups.length)
+        groups.push(group)
+      }
+      group.orders.push(order)
+    }
+
+    return groups
+  }, [filteredOrders])
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -878,86 +913,98 @@ export default function OrdersPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3">
-          {filteredOrders.map((order) => {
-            const conf = ORDER_STATUS_CONFIG[order.status]
-            const Icon = conf.icon
-            const nextStatuses = STATUS_TRANSITIONS[order.status]
-            return (
-              <Card
-                key={order.orderId}
-                className="hover:shadow-sm transition-shadow cursor-pointer"
-                onClick={() => setDetailOrder(order)}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-xs text-blue-600 font-semibold">{order.orderNumber}</span>
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${conf.bg} ${conf.color}`}>
-                          <Icon className="h-3 w-3" />
-                          {conf.label}
-                        </span>
-                        {order.billId && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
-                            <Receipt className="h-3 w-3" />
-                            Billed
-                          </span>
-                        )}
-                      </div>
-                      <p className="font-semibold mt-1">{order.customerInfo.name}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                        <span className="text-xs text-gray-500">
-                          {order.orderDate ? format(parseISO(order.orderDate), 'd MMM yyyy') : (order.createdAt?.toDate ? formatDate(order.createdAt.toDate()) : '—')}
-                        </span>
-                        {order.timeSlot && (
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${TIME_SLOT_STYLE[order.timeSlot]}`}>
-                            {TIME_SLOTS.find(s => s.value === order.timeSlot)?.label}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
-                        {formatOrderItemsSummary(order.items)}
-                      </p>
-                      {order.comment && (
-                        <p className="text-xs text-gray-400 italic mt-0.5 line-clamp-1">{order.comment}</p>
-                      )}
-                      {(order.advanceAmount ?? 0) > 0 && (
-                        <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
-                          Advance: {formatCurrency(order.advanceAmount ?? 0)}
-                        </p>
-                      )}
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="font-bold text-gray-900 dark:text-white">{formatCurrency(order.estimatedAmount)}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Estimated</p>
-                      {nextStatuses.length > 0 && (
-                        <div className="flex gap-1 justify-end mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                          {nextStatuses.map((s) => {
-                            const nc = ORDER_STATUS_CONFIG[s]
-                            const NIcon = nc.icon
-                            return (
-                              <Button
-                                key={s}
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => requestStatusChange(order, s)}
-                                disabled={updateStatusMutation.isPending}
-                              >
-                                <NIcon className={`h-3 w-3 ${nc.color}`} />
-                                {nc.label}
-                              </Button>
-                            )
-                          })}
+        <div className="space-y-6">
+          {ordersByDate.map((group) => (
+            <div key={group.dateKey} className="space-y-3">
+              <div className="flex items-center gap-3 sticky top-0 z-10 bg-gray-50/95 dark:bg-[#1a1f2e]/95 backdrop-blur-sm py-1.5 -mx-1 px-1">
+                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                  {group.label}
+                </h2>
+                <div className="h-px flex-1 bg-gray-200 dark:bg-[#2a3040]" />
+                <span className="text-xs text-gray-400 tabular-nums">
+                  {group.orders.length} order{group.orders.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="grid gap-3">
+                {group.orders.map((order) => {
+                  const conf = ORDER_STATUS_CONFIG[order.status]
+                  const Icon = conf.icon
+                  const nextStatuses = STATUS_TRANSITIONS[order.status]
+                  return (
+                    <Card
+                      key={order.orderId}
+                      className="hover:shadow-sm transition-shadow cursor-pointer"
+                      onClick={() => setDetailOrder(order)}
+                    >
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-xs text-blue-600 font-semibold">{order.orderNumber}</span>
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${conf.bg} ${conf.color}`}>
+                                <Icon className="h-3 w-3" />
+                                {conf.label}
+                              </span>
+                              {order.billId && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
+                                  <Receipt className="h-3 w-3" />
+                                  Billed
+                                </span>
+                              )}
+                            </div>
+                            <p className="font-semibold mt-1">{order.customerInfo.name}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              {order.timeSlot && (
+                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${TIME_SLOT_STYLE[order.timeSlot]}`}>
+                                  {TIME_SLOTS.find(s => s.value === order.timeSlot)?.label}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                              {formatOrderItemsSummary(order.items)}
+                            </p>
+                            {order.comment && (
+                              <p className="text-xs text-gray-400 italic mt-0.5 line-clamp-1">{order.comment}</p>
+                            )}
+                            {(order.advanceAmount ?? 0) > 0 && (
+                              <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
+                                Advance: {formatCurrency(order.advanceAmount ?? 0)}
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="font-bold text-gray-900 dark:text-white">{formatCurrency(order.estimatedAmount)}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">Estimated</p>
+                            {nextStatuses.length > 0 && (
+                              <div className="flex gap-1 justify-end mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                                {nextStatuses.map((s) => {
+                                  const nc = ORDER_STATUS_CONFIG[s]
+                                  const NIcon = nc.icon
+                                  return (
+                                    <Button
+                                      key={s}
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      onClick={() => requestStatusChange(order, s)}
+                                      disabled={updateStatusMutation.isPending}
+                                    >
+                                      <NIcon className={`h-3 w-3 ${nc.color}`} />
+                                      {nc.label}
+                                    </Button>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

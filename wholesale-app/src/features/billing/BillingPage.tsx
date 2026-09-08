@@ -1706,11 +1706,21 @@ export default function BillingPage() {
                         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
                       })
                     }
+                    const balanceDue =
+                      outstandingShown != null
+                        ? outstandingShown
+                        : viewBill.movedToLedger
+                          ? 0
+                          : viewBill.remainingAmount
+                    const shareText = [
+                      `Bill Amount: ${formatCurrency(viewBill.grandTotal)}`,
+                      `Balance Due: ${formatCurrency(balanceDue)}`,
+                    ].join('\n')
                     await shareElementAsImage({
                       elementId: 'invoice-print',
                       filename: `invoice-${viewBill.billNumber}.jpg`,
                       title: `Invoice ${viewBill.billNumber}`,
-                      text: `Invoice ${viewBill.billNumber}`,
+                      text: shareText,
                       phone: viewBill.customerInfo?.phone,
                       onError: (msg) => toast.error(msg),
                       onFallback: (msg) => toast.info(msg),
