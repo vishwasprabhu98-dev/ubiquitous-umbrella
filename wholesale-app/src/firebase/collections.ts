@@ -10,4 +10,5 @@ export const COLLECTIONS = {
   SETTINGS: 'settings',
   PURCHASES: 'purchases',
   CUSTOMER_BALANCES: 'customerBalances',
+  ACTIVITY_LOGS: 'activityLogs',
 } as const

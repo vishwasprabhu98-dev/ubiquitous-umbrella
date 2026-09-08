@@ -7,6 +7,7 @@ import { Plus, Search, Edit2, Trash2, Loader2, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { getFirestoreErrorMessage } from '@/lib/firestoreUtils'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/ui/numeric-input'
@@ -63,9 +64,18 @@ export default function CustomerManagement() {
 
   const createMutation = useMutation({
     mutationFn: (data: CustomerFormData) => customerRepository.create(data),
-    onSuccess: () => {
+    onSuccess: (customer) => {
       queryClient.invalidateQueries({ queryKey: ['customers'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      logActivity({
+        type: 'settings.customer_created',
+        description: `Created customer ${customer.name} (${customer.phone})`,
+        entityType: 'customer',
+        entityId: customer.customerId,
+        entityLabel: customer.name,
+        customerId: customer.customerId,
+        customerName: customer.name,
+      })
       toast.success('Customer created successfully')
       closeDialog()
     },
@@ -74,10 +84,19 @@ export default function CustomerManagement() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<CustomerFormData> }) =>
-      customerRepository.update(id, data),
-    onSuccess: () => {
+      customerRepository.update(id, data).then(() => ({ id, data })),
+    onSuccess: ({ id, data }) => {
       queryClient.invalidateQueries({ queryKey: ['customers'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      logActivity({
+        type: 'settings.customer_updated',
+        description: `Updated customer ${data.name || id}`,
+        entityType: 'customer',
+        entityId: id,
+        entityLabel: data.name,
+        customerId: id,
+        customerName: data.name,
+      })
       toast.success('Customer updated successfully')
       closeDialog()
     },
@@ -85,10 +104,23 @@ export default function CustomerManagement() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => customerRepository.delete(id),
-    onSuccess: () => {
+    mutationFn: async (id: string) => {
+      const customer = customers.find((c) => c.customerId === id)
+      await customerRepository.delete(id)
+      return customer
+    },
+    onSuccess: (customer) => {
       queryClient.invalidateQueries({ queryKey: ['customers'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
+      logActivity({
+        type: 'settings.customer_deleted',
+        description: `Deleted customer ${customer?.name || 'unknown'}`,
+        entityType: 'customer',
+        entityId: customer?.customerId || 'unknown',
+        entityLabel: customer?.name,
+        customerId: customer?.customerId,
+        customerName: customer?.name,
+      })
       toast.success('Customer deleted')
       setDeleteId(null)
     },

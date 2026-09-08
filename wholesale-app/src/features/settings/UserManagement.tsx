@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select'
 import { formatDate } from '@/lib/utils'
 import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '@/lib/roleAccess'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import type { AppUser, UserRole } from '@/types'
 
 const ROLE_STYLES: Record<UserRole, string> = {
@@ -36,10 +37,18 @@ export default function UserManagement() {
   })
 
   const roleMutation = useMutation({
-    mutationFn: ({ uid, role }: { uid: string; role: UserRole }) =>
-      userRepository.updateRole(uid, role),
-    onSuccess: () => {
+    mutationFn: ({ uid, role, user }: { uid: string; role: UserRole; user: AppUser }) =>
+      userRepository.updateRole(uid, role).then(() => ({ uid, role, user })),
+    onSuccess: ({ role, user }) => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      logActivity({
+        type: 'settings.user_role_updated',
+        description: `Changed role of ${user.displayName || user.email} from ${user.role} to ${role}`,
+        entityType: 'user',
+        entityId: user.uid,
+        entityLabel: user.displayName || user.email,
+        meta: { fromRole: user.role, toRole: role, email: user.email },
+      })
       toast.success('User role updated')
     },
     onError: (error) => toast.error(getFirestoreErrorMessage(error)),
@@ -57,7 +66,7 @@ export default function UserManagement() {
       return
     }
     if (user.role === role) return
-    roleMutation.mutate({ uid: user.uid, role })
+    roleMutation.mutate({ uid: user.uid, role, user })
   }
 
   return (

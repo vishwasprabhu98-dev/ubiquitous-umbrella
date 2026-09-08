@@ -21,10 +21,6 @@ service cloud.firestore {
       return isSignedIn() && userDoc().data.role in ['finance', 'admin'];
     }
 
-    function isPurchasesPath() {
-      return request.path.size() >= 5 && request.path[4] == 'purchases';
-    }
-
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId)
@@ -39,19 +35,52 @@ service cloud.firestore {
       allow read, write: if isFinanceOrAdmin();
     }
 
-    /** Public storefront catalog — anyone can read; only admins manage. */
+    /** Public catalog — anyone can read; admins manage. */
     match /catalogProducts/{productId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow write: if isAdmin();
     }
 
-    /** Public shop name/details for the storefront catalog header. */
-    match /settings/shopProfile {
-      allow read: if true;
+    /** Shop profile is public for /catalog; other settings need auth. */
+    match /settings/{docId} {
+      allow read: if docId == 'shopProfile' || isSignedIn();
+      allow write: if isSignedIn();
     }
 
-    match /{document=**} {
-      allow read, write: if isSignedIn() && !isPurchasesPath();
+    match /customers/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /products/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /customerProductPricing/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /bills/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /orders/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /transactions/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /activityLogs/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /customerBalances/{customerId} {
+      allow read, write: if isSignedIn();
+
+      match /monthlySnapshots/{monthKey} {
+        allow read, write: if isSignedIn();
+      }
     }
   }
 }

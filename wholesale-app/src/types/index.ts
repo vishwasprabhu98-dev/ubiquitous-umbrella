@@ -293,3 +293,77 @@ export interface PurchaseInvoice {
   createdAt: Timestamp
   updatedAt?: Timestamp
 }
+
+// ─── Activity Logs ─────────────────────────────────────────────────────────
+
+export type ActivityEventType =
+  | 'bill.created'
+  | 'bill.updated'
+  | 'bill.payment_recorded'
+  | 'bill.moved_to_ledger'
+  | 'bill.removed_from_ledger'
+  | 'bill.shared_whatsapp'
+  | 'bill.shared_pdf'
+  | 'bill.printed'
+  | 'ledger.payment_recorded'
+  | 'order.created'
+  | 'order.updated'
+  | 'order.status_changed'
+  | 'order.deleted'
+  | 'order.converted_to_bill'
+  | 'purchase.created'
+  | 'purchase.updated'
+  | 'purchase.deleted'
+  | 'settings.shop_profile_updated'
+  | 'settings.number_format_updated'
+  | 'settings.user_role_updated'
+  | 'settings.customer_created'
+  | 'settings.customer_updated'
+  | 'settings.customer_deleted'
+  | 'settings.product_created'
+  | 'settings.product_updated'
+  | 'settings.product_deleted'
+  | 'settings.catalog_created'
+  | 'settings.catalog_updated'
+  | 'settings.catalog_deleted'
+  | 'settings.pricing_updated'
+  | 'settings.ledger_rebuilt'
+
+export type ActivityEntityType =
+  | 'bill'
+  | 'customer'
+  | 'order'
+  | 'purchase'
+  | 'ledger'
+  | 'product'
+  | 'catalog'
+  | 'settings'
+  | 'user'
+
+export interface ActivityLog {
+  logId: string
+  type: ActivityEventType
+  /** Human-readable summary of what happened. */
+  description: string
+  createdAt: Timestamp
+  /** Firestore TTL field — auto-delete after retention (typically 2 months). */
+  expireAt: Timestamp
+  actorUid: string
+  actorName: string
+  actorEmail: string
+  actorRole: UserRole
+  entityType: ActivityEntityType
+  entityId: string
+  entityLabel?: string
+  customerId?: string
+  customerName?: string
+  /** Line items snapshot, e.g. for bill/order create. */
+  itemsSummary?: string
+  /** Previous items when updating a bill/order. */
+  itemsBefore?: string
+  /** New items when updating a bill/order. */
+  itemsAfter?: string
+  meta?: Record<string, string | number | boolean | null | undefined>
+}
+
+export type ActivityLogInput = Omit<ActivityLog, 'logId' | 'createdAt' | 'expireAt'>

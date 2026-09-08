@@ -29,6 +29,8 @@ import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { productRepository } from '@/firebase/repositories/productRepository'
 import { pricingRepository } from '@/firebase/repositories/pricingRepository'
 import { transactionRepository } from '@/firebase/repositories/transactionRepository'
+import { customerBalanceRepository } from '@/firebase/repositories/customerBalanceRepository'
+import { logActivity, formatActivityItems } from '@/firebase/repositories/activityLogRepository'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/ui/numeric-input'
@@ -239,7 +241,6 @@ export default function BillingPage() {
   const [search, setSearch] = useState('')
   const [viewBill, setViewBill] = useState<Bill | null>(null)
   const [sharingPdf, setSharingPdf] = useState(false)
-  const [whatsappHideDue, setWhatsappHideDue] = useState(false)
   const [printingReceipt, setPrintingReceipt] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
@@ -296,6 +297,12 @@ export default function BillingPage() {
     queryKey: ['shopProfile'],
     queryFn: () => settingsRepository.getShopProfile(),
     staleTime: 5 * 60 * 1000,
+  })
+  const { data: viewLedgerBalance } = useQuery({
+    queryKey: ['customerBalances', viewBill?.customerId],
+    queryFn: () => customerBalanceRepository.get(viewBill!.customerId!),
+    enabled: Boolean(viewBill?.customerId),
+    staleTime: 15_000,
   })
   const { data: customers = [] } = useQuery({
     queryKey: ['customers'],
@@ -506,11 +513,30 @@ export default function BillingPage() {
         billingDate: data.billingDate || todayIst(),
       })
     },
-    onSuccess: () => {
+    onSuccess: (bill) => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
+      if (bill) {
+        const itemsSummary = formatActivityItems(bill.items)
+        logActivity({
+          type: 'bill.created',
+          description: `Created bill ${bill.billNumber} for ${bill.customerInfo?.name || 'customer'} — ₹${bill.grandTotal}${itemsSummary ? ` · Items: ${itemsSummary}` : ''}`,
+          entityType: 'bill',
+          entityId: bill.billId,
+          entityLabel: bill.billNumber,
+          customerId: bill.customerId,
+          customerName: bill.customerInfo?.name,
+          itemsSummary: itemsSummary || undefined,
+          meta: {
+            grandTotal: bill.grandTotal,
+            amountPaid: bill.amountPaid,
+            remainingAmount: bill.remainingAmount,
+            paymentStatus: bill.paymentStatus,
+          },
+        })
+      }
       toast.success('Bill created successfully!')
       closeForm()
     },
@@ -524,21 +550,22 @@ export default function BillingPage() {
       const amtPaid = Number(data.amountPaid) || 0
       const remaining = Math.max(0, grand - amtPaid)
       const paymentStatus = remaining <= 0 ? 'PAID' : amtPaid > 0 ? 'PARTIAL' : 'UNPAID'
-      return billRepository.update(editingBill.billId, {
+      const itemsAfter = data.items.map((item) => ({
+        ...item,
+        quantity: Number(item.quantity),
+        unitRate: Number(item.unitRate),
+        itemDiscount: Number(item.itemDiscount),
+        gstPercentage: 0,
+        total: Number(item.quantity) * Number(item.unitRate) - Number(item.itemDiscount),
+      }))
+      await billRepository.update(editingBill.billId, {
         customerInfo: {
           customerId: data.customerId,
           name: data.customerName,
           phone: data.customerPhone,
           gstNumber: data.customerGst,
         },
-        items: data.items.map((item) => ({
-          ...item,
-          quantity: Number(item.quantity),
-          unitRate: Number(item.unitRate),
-          itemDiscount: Number(item.itemDiscount),
-          gstPercentage: 0,
-          total: Number(item.quantity) * Number(item.unitRate) - Number(item.itemDiscount),
-        })),
+        items: itemsAfter,
         subtotal,
         discount: Number(data.discount) || 0,
         gstAmount,
@@ -551,12 +578,46 @@ export default function BillingPage() {
         comment: data.comment?.trim() ?? '',
         billingDate: data.billingDate || todayIst(),
       })
+      return {
+        billId: editingBill.billId,
+        billNumber: editingBill.billNumber,
+        customerId: data.customerId,
+        customerName: data.customerName,
+        grandTotal: grand,
+        amountPaid: amtPaid,
+        remainingAmount: remaining,
+        itemsBefore: formatActivityItems(editingBill.items),
+        itemsAfter: formatActivityItems(itemsAfter),
+      }
     },
-    onSuccess: () => {
+    onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
+      if (updated) {
+        const itemsChanged =
+          (updated.itemsBefore || '') !== (updated.itemsAfter || '')
+        logActivity({
+          type: 'bill.updated',
+          description: `Updated bill ${updated.billNumber} for ${updated.customerName || 'customer'} — ₹${updated.grandTotal}${
+            itemsChanged && updated.itemsAfter ? ` · Items: ${updated.itemsAfter}` : ''
+          }`,
+          entityType: 'bill',
+          entityId: updated.billId,
+          entityLabel: updated.billNumber,
+          customerId: updated.customerId,
+          customerName: updated.customerName,
+          itemsSummary: updated.itemsAfter || undefined,
+          itemsBefore: itemsChanged ? updated.itemsBefore || undefined : undefined,
+          itemsAfter: itemsChanged ? updated.itemsAfter || undefined : undefined,
+          meta: {
+            grandTotal: updated.grandTotal,
+            amountPaid: updated.amountPaid,
+            remainingAmount: updated.remainingAmount,
+          },
+        })
+      }
       toast.success('Bill updated successfully!')
       closeForm()
     },
@@ -571,12 +632,22 @@ export default function BillingPage() {
         status: 'DONE',
         // Keep amountPaid; clear bill-level due — outstanding lives on the ledger.
         remainingAmount: 0,
-      }),
-    onSuccess: () => {
+      }).then(() => bill),
+    onSuccess: (bill) => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
+      logActivity({
+        type: 'bill.moved_to_ledger',
+        description: `Moved bill ${bill.billNumber} to ledger for ${bill.customerInfo?.name || 'customer'}`,
+        entityType: 'bill',
+        entityId: bill.billId,
+        entityLabel: bill.billNumber,
+        customerId: bill.customerId,
+        customerName: bill.customerInfo?.name,
+        meta: { remainingCleared: bill.remainingAmount },
+      })
       toast.success('Bill moved to customer ledger')
     },
     onError: () => toast.error('Failed to move bill to ledger'),
@@ -587,18 +658,30 @@ export default function BillingPage() {
       const remaining = Math.max(0, bill.grandTotal - bill.amountPaid)
       const paymentStatus: PaymentStatus =
         remaining <= 0 ? 'PAID' : bill.amountPaid > 0 ? 'PARTIAL' : 'UNPAID'
-      return billRepository.update(bill.billId, {
-        movedToLedger: false,
-        remainingAmount: remaining,
-        paymentStatus,
-        status: statusFromPayment(paymentStatus),
-      })
+      return billRepository
+        .update(bill.billId, {
+          movedToLedger: false,
+          remainingAmount: remaining,
+          paymentStatus,
+          status: statusFromPayment(paymentStatus),
+        })
+        .then(() => ({ bill, remaining }))
     },
-    onSuccess: () => {
+    onSuccess: ({ bill, remaining }) => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
+      logActivity({
+        type: 'bill.removed_from_ledger',
+        description: `Removed bill ${bill.billNumber} from ledger for ${bill.customerInfo?.name || 'customer'} — due ₹${remaining}`,
+        entityType: 'bill',
+        entityId: bill.billId,
+        entityLabel: bill.billNumber,
+        customerId: bill.customerId,
+        customerName: bill.customerInfo?.name,
+        meta: { remainingAmount: remaining },
+      })
       toast.success('Bill removed from ledger')
     },
     onError: () => toast.error('Failed to remove bill from ledger'),
@@ -644,6 +727,22 @@ export default function BillingPage() {
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'balance-sheet'] })
       queryClient.invalidateQueries({ queryKey: ['transactions', 'balance-sheet'] })
+      logActivity({
+        type: 'bill.payment_recorded',
+        description: `Recorded payment of ₹${amount} on bill ${paymentBill.billNumber} for ${paymentBill.customerInfo?.name || 'customer'} (${payMode})`,
+        entityType: 'bill',
+        entityId: paymentBill.billId,
+        entityLabel: paymentBill.billNumber,
+        customerId: paymentBill.customerId,
+        customerName: paymentBill.customerInfo?.name,
+        meta: {
+          amount,
+          paymentMode: payMode,
+          newAmountPaid,
+          newRemaining,
+          ...(payRemarks.trim() ? { remarks: payRemarks.trim() } : {}),
+        },
+      })
       toast.success(`Payment of ${formatCurrency(amount)} recorded`)
       setPaymentBill(null)
     } catch {
@@ -1507,14 +1606,18 @@ export default function BillingPage() {
 
       {/* ── Invoice View Dialog ── */}
       {viewBill && (
-        <Dialog open={!!viewBill} onOpenChange={() => { setViewBill(null); setWhatsappHideDue(false) }}>
+        <Dialog open={!!viewBill} onOpenChange={() => setViewBill(null)}>
           <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto print:shadow-none">
             <DialogHeader className="print:hidden">
               <DialogTitle>Invoice — {viewBill.billNumber}</DialogTitle>
             </DialogHeader>
             <InvoiceView
               bill={viewBill}
-              hideBalanceDue={whatsappHideDue && Boolean(viewBill.customerId)}
+              ledgerOutstanding={
+                viewBill.customerId
+                  ? (viewLedgerBalance?.outstanding ?? null)
+                  : null
+              }
             />
             <DialogFooter className="print:hidden">
               <Button
@@ -1525,6 +1628,15 @@ export default function BillingPage() {
                   setPrintingReceipt(true)
                   try {
                     await printBillToBlePrinter(viewBill, shopProfile)
+                    logActivity({
+                      type: 'bill.printed',
+                      description: `Printed thermal receipt for bill ${viewBill.billNumber}`,
+                      entityType: 'bill',
+                      entityId: viewBill.billId,
+                      entityLabel: viewBill.billNumber,
+                      customerId: viewBill.customerId,
+                      customerName: viewBill.customerInfo?.name,
+                    })
                     toast.success('Receipt sent to printer')
                   } catch (err) {
                     if (err instanceof Error && err.name === 'NotFoundError') {
@@ -1554,6 +1666,15 @@ export default function BillingPage() {
                       title: `Invoice ${viewBill.billNumber}`,
                       onFallback: (msg) => toast.info(msg),
                     })
+                    logActivity({
+                      type: 'bill.shared_pdf',
+                      description: `Shared PDF of bill ${viewBill.billNumber} for ${viewBill.customerInfo?.name || 'customer'}`,
+                      entityType: 'bill',
+                      entityId: viewBill.billId,
+                      entityLabel: viewBill.billNumber,
+                      customerId: viewBill.customerId,
+                      customerName: viewBill.customerInfo?.name,
+                    })
                   } catch (err) {
                     if (err instanceof Error && err.name !== 'AbortError') {
                       toast.error('Failed to share invoice')
@@ -1572,14 +1693,19 @@ export default function BillingPage() {
                 title={shopProfileLoading ? 'Loading invoice…' : undefined}
                 onClick={async () => {
                   setSharingPdf(true)
-                  const hideDue = Boolean(viewBill.customerId)
-                  if (hideDue) {
-                    setWhatsappHideDue(true)
-                    await new Promise<void>((resolve) => {
-                      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-                    })
-                  }
                   try {
+                    let outstandingShown: number | null = null
+                    if (viewBill.customerId) {
+                      const balance = await customerBalanceRepository.get(viewBill.customerId)
+                      outstandingShown = balance?.outstanding ?? null
+                      queryClient.setQueryData(
+                        ['customerBalances', viewBill.customerId],
+                        balance
+                      )
+                      await new Promise<void>((resolve) => {
+                        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+                      })
+                    }
                     await shareElementAsImage({
                       elementId: 'invoice-print',
                       filename: `invoice-${viewBill.billNumber}.jpg`,
@@ -1589,12 +1715,28 @@ export default function BillingPage() {
                       onError: (msg) => toast.error(msg),
                       onFallback: (msg) => toast.info(msg),
                     })
+                    logActivity({
+                      type: 'bill.shared_whatsapp',
+                      description: `Shared bill ${viewBill.billNumber} on WhatsApp for ${viewBill.customerInfo?.name || 'customer'}${
+                        outstandingShown != null
+                          ? ` (ledger balance ₹${outstandingShown})`
+                          : ''
+                      }`,
+                      entityType: 'bill',
+                      entityId: viewBill.billId,
+                      entityLabel: viewBill.billNumber,
+                      customerId: viewBill.customerId,
+                      customerName: viewBill.customerInfo?.name,
+                      meta: {
+                        outstandingShown,
+                        phone: viewBill.customerInfo?.phone,
+                      },
+                    })
                   } catch (err) {
                     if (err instanceof Error && err.name !== 'AbortError') {
                       toast.error('Failed to share invoice')
                     }
                   } finally {
-                    setWhatsappHideDue(false)
                     setSharingPdf(false)
                   }
                 }}

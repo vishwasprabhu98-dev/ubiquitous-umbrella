@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { catalogProductRepository } from '@/firebase/repositories/catalogProductRepository'
 import { getFirestoreErrorMessage } from '@/lib/firestoreUtils'
 import { toDisplayImageUrl } from '@/lib/driveImageUrl'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -200,8 +201,15 @@ export default function CatalogProductManagement() {
 
   const createMutation = useMutation({
     mutationFn: (data: CatalogProductFormData) => catalogProductRepository.create(data),
-    onSuccess: () => {
+    onSuccess: (product) => {
       queryClient.invalidateQueries({ queryKey: ['catalogProducts'] })
+      logActivity({
+        type: 'settings.catalog_created',
+        description: `Created catalog product ${product.name}`,
+        entityType: 'catalog',
+        entityId: product.catalogProductId,
+        entityLabel: product.name,
+      })
       toast.success('Catalog product created')
       closeDialog()
     },
@@ -215,9 +223,16 @@ export default function CatalogProductManagement() {
     }: {
       id: string
       data: Partial<CatalogProductFormData>
-    }) => catalogProductRepository.update(id, data),
-    onSuccess: () => {
+    }) => catalogProductRepository.update(id, data).then(() => ({ id, data })),
+    onSuccess: ({ id, data }) => {
       queryClient.invalidateQueries({ queryKey: ['catalogProducts'] })
+      logActivity({
+        type: 'settings.catalog_updated',
+        description: `Updated catalog product ${data.name || id}`,
+        entityType: 'catalog',
+        entityId: id,
+        entityLabel: data.name,
+      })
       toast.success('Catalog product updated')
       closeDialog()
     },
@@ -225,9 +240,20 @@ export default function CatalogProductManagement() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => catalogProductRepository.delete(id),
-    onSuccess: () => {
+    mutationFn: async (id: string) => {
+      const product = products.find((p) => p.catalogProductId === id)
+      await catalogProductRepository.delete(id)
+      return product
+    },
+    onSuccess: (product) => {
       queryClient.invalidateQueries({ queryKey: ['catalogProducts'] })
+      logActivity({
+        type: 'settings.catalog_deleted',
+        description: `Deleted catalog product ${product?.name || 'unknown'}`,
+        entityType: 'catalog',
+        entityId: product?.catalogProductId || 'unknown',
+        entityLabel: product?.name,
+      })
       toast.success('Catalog product deleted')
       setDeleteId(null)
     },

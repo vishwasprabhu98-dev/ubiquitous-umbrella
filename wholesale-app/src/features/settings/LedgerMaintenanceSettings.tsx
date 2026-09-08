@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { customerBalanceRepository } from '@/firebase/repositories/customerBalanceRepository'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 
@@ -13,6 +14,13 @@ export default function LedgerMaintenanceSettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
+      logActivity({
+        type: 'settings.ledger_rebuilt',
+        description: 'Rebuilt all customer ledger balances',
+        entityType: 'settings',
+        entityId: 'customerBalances',
+        entityLabel: 'Ledger rebuild',
+      })
       toast.success('Customer balances rebuilt')
     },
     onError: () => toast.error('Failed to rebuild balances'),

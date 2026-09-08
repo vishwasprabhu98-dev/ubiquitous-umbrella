@@ -7,11 +7,14 @@ import type { Bill } from '@/types'
 
 interface InvoiceViewProps {
   bill: Bill
-  /** Hide Balance Due (e.g. WhatsApp share for registered customers). */
-  hideBalanceDue?: boolean
+  /**
+   * When set (registered customer), show this ledger outstanding as Balance Due
+   * instead of the bill’s remainingAmount.
+   */
+  ledgerOutstanding?: number | null
 }
 
-export default function InvoiceView({ bill, hideBalanceDue = false }: InvoiceViewProps) {
+export default function InvoiceView({ bill, ledgerOutstanding = null }: InvoiceViewProps) {
   const { data: shopProfile, isLoading } = useQuery({
     queryKey: ['shopProfile'],
     queryFn: () => settingsRepository.getShopProfile(),
@@ -45,6 +48,15 @@ export default function InvoiceView({ bill, hideBalanceDue = false }: InvoiceVie
   )
   const billDay = getBillDateString(bill)
   const invoiceDateLabel = billDay ? formatDate(istDayStart(billDay)) : '—'
+
+  const useLedgerDue = ledgerOutstanding != null
+  const dueAmount = useLedgerDue
+    ? ledgerOutstanding
+    : bill.movedToLedger
+      ? 0
+      : bill.remainingAmount
+  const showBalanceDue = dueAmount > 0.001
+  const showCredit = useLedgerDue && dueAmount < -0.001
 
   return (
     <div className="print-document p-6" id="invoice-print">
@@ -166,10 +178,16 @@ export default function InvoiceView({ bill, hideBalanceDue = false }: InvoiceVie
             <span>Amount Paid</span>
             <span>{formatCurrency(bill.amountPaid)}</span>
           </div>
-          {bill.remainingAmount > 0 && !bill.movedToLedger && !hideBalanceDue && (
+          {showBalanceDue && (
             <div className="flex justify-between pd-semibold pd-danger border-t pt-1">
               <span>Balance Due</span>
-              <span>{formatCurrency(bill.remainingAmount)}</span>
+              <span>{formatCurrency(dueAmount)}</span>
+            </div>
+          )}
+          {showCredit && (
+            <div className="flex justify-between pd-semibold pd-success border-t pt-1">
+              <span>Credit Balance</span>
+              <span>{formatCurrency(Math.abs(dueAmount))}</span>
             </div>
           )}
         </div>

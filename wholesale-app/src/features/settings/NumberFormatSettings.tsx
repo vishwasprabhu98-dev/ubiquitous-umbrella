@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { settingsRepository, formatNumberPreview, DEFAULT_NUMBER_FORMAT } from '@/firebase/repositories/settingsRepository'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import type { NumberFormatConfig, NumberFormatSettings, YearFormat, SeparatorChar } from '@/types'
 
 const YEAR_FORMAT_OPTIONS: { value: YearFormat; label: string }[] = [
@@ -171,6 +172,13 @@ export default function NumberFormatSettings() {
       settingsRepository.saveNumberFormat(settings),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings', 'numberFormat'] })
+      logActivity({
+        type: 'settings.number_format_updated',
+        description: 'Updated bill / order / purchase number format settings',
+        entityType: 'settings',
+        entityId: 'numberFormat',
+        entityLabel: 'Number format',
+      })
     },
   })
 

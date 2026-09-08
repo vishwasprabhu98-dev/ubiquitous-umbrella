@@ -19,6 +19,7 @@ import { purchaseRepository } from '@/firebase/repositories/purchaseRepository'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { productRepository } from '@/firebase/repositories/productRepository'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { sharePdfBlob, downloadPdfBlob } from '@/lib/sharePdf'
 import { createPurchasePdfBlob } from '@/lib/purchasePdf'
 import PurchaseInvoiceView from './PurchaseInvoiceView'
@@ -209,6 +210,7 @@ export default function PurchasePage() {
     mutationFn: async ({ data, asDraft }: { data: PurchaseFormData; asDraft: boolean }) => {
       if (!validateVendor(data)) throw new Error('validation')
       const payload = buildPayload(data, asDraft ? 'DRAFT' : 'SAVED')
+      const vendorName = payload.vendorInfo?.name || 'vendor'
 
       if (editingPurchase) {
         const updates = { ...payload } as Partial<PurchaseInvoice>
@@ -216,21 +218,58 @@ export default function PurchasePage() {
           updates.purchaseNumber = await purchaseRepository.generatePurchaseNumber()
         }
         await purchaseRepository.update(editingPurchase.purchaseId, updates)
-      } else {
-        if (asDraft) {
-          await purchaseRepository.create(payload)
-        } else {
-          const purchaseNumber = await purchaseRepository.generatePurchaseNumber()
-          await purchaseRepository.create({ ...payload, purchaseNumber })
+        return {
+          isEdit: true,
+          asDraft,
+          purchaseId: editingPurchase.purchaseId,
+          purchaseNumber: updates.purchaseNumber ?? editingPurchase.purchaseNumber,
+          vendorName,
+          grandTotal: payload.grandTotal,
+          status: payload.status,
         }
       }
+
+      if (asDraft) {
+        const created = await purchaseRepository.create(payload)
+        return {
+          isEdit: false,
+          asDraft: true,
+          purchaseId: created.purchaseId,
+          purchaseNumber: created.purchaseNumber,
+          vendorName,
+          grandTotal: created.grandTotal,
+          status: created.status,
+        }
+      }
+
+      const purchaseNumber = await purchaseRepository.generatePurchaseNumber()
+      const created = await purchaseRepository.create({ ...payload, purchaseNumber })
+      return {
+        isEdit: false,
+        asDraft: false,
+        purchaseId: created.purchaseId,
+        purchaseNumber,
+        vendorName,
+        grandTotal: created.grandTotal,
+        status: created.status,
+      }
     },
-    onSuccess: (_, { asDraft }) => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['purchases'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['purchases', 'vendors-month'] })
-      toast.success(asDraft ? 'Draft saved' : 'Purchase invoice saved')
+      const label = result.purchaseNumber || result.purchaseId
+      logActivity({
+        type: result.isEdit ? 'purchase.updated' : 'purchase.created',
+        description: `${result.isEdit ? 'Updated' : 'Created'} purchase ${label} for ${result.vendorName}${result.asDraft ? ' (draft)' : ''} — ₹${result.grandTotal}`,
+        entityType: 'purchase',
+        entityId: result.purchaseId,
+        entityLabel: label,
+        customerName: result.vendorName,
+        meta: { asDraft: result.asDraft, status: result.status, grandTotal: result.grandTotal },
+      })
+      toast.success(result.asDraft ? 'Draft saved' : 'Purchase invoice saved')
       closeForm()
     },
     onError: (err) => {
@@ -240,12 +279,24 @@ export default function PurchasePage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => purchaseRepository.delete(id),
-    onSuccess: () => {
+    mutationFn: async (id: string) => {
+      const purchase = purchases.find((p) => p.purchaseId === id)
+      await purchaseRepository.delete(id)
+      return purchase ?? ({ purchaseId: id } as PurchaseInvoice)
+    },
+    onSuccess: (purchase) => {
       queryClient.invalidateQueries({ queryKey: ['purchases'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['purchases', 'vendors-month'] })
+      logActivity({
+        type: 'purchase.deleted',
+        description: `Deleted purchase draft ${purchase.purchaseNumber || purchase.purchaseId} for ${purchase.vendorInfo?.name || 'vendor'}`,
+        entityType: 'purchase',
+        entityId: purchase.purchaseId,
+        entityLabel: purchase.purchaseNumber,
+        customerName: purchase.vendorInfo?.name,
+      })
       toast.success('Draft deleted')
       setDeleteId(null)
     },

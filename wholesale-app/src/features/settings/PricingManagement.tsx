@@ -6,6 +6,7 @@ import { pricingRepository } from '@/firebase/repositories/pricingRepository'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { productRepository } from '@/firebase/repositories/productRepository'
 import { getFirestoreErrorMessage } from '@/lib/firestoreUtils'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -129,6 +130,16 @@ export default function PricingManagement() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pricing'] })
+      const customer = customers.find((c) => c.customerId === customerId)
+      logActivity({
+        type: 'settings.pricing_updated',
+        description: `Updated custom pricing for ${customer?.name || customerId}`,
+        entityType: 'settings',
+        entityId: customerId,
+        entityLabel: customer?.name || customerId,
+        customerId,
+        customerName: customer?.name,
+      })
       toast.success('Custom prices saved')
     },
     onError: (error) => toast.error(getFirestoreErrorMessage(error)),

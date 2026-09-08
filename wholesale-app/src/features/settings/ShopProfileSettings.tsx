@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { settingsRepository, DEFAULT_SHOP_PROFILE } from '@/firebase/repositories/settingsRepository'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import type { ShopProfile } from '@/types'
 
 export default function ShopProfileSettings() {
@@ -28,8 +29,15 @@ export default function ShopProfileSettings() {
 
   const saveMutation = useMutation({
     mutationFn: (data: ShopProfile) => settingsRepository.saveShopProfile(data),
-    onSuccess: () => {
+    onSuccess: (_data, profile) => {
       queryClient.invalidateQueries({ queryKey: ['shopProfile'] })
+      logActivity({
+        type: 'settings.shop_profile_updated',
+        description: `Updated shop profile${profile.name?.trim() ? ` (${profile.name.trim()})` : ''}`,
+        entityType: 'settings',
+        entityId: 'shopProfile',
+        entityLabel: profile.name?.trim() || 'Shop profile',
+      })
       toast.success('Shop profile saved')
     },
     onError: () => toast.error('Failed to save shop profile'),

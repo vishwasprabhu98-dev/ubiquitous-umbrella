@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -819,13 +820,34 @@ export default function LedgerPage() {
         remarks: remarks || undefined,
       })
     },
-    onSuccess: (_, { entry }) => {
+    onSuccess: (_, { entry, amount, mode, remarks }) => {
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['purchases'] })
       queryClient.invalidateQueries({ queryKey: ['purchases', 'vendors-month'] })
       queryClient.invalidateQueries({ queryKey: ['transactions', 'balance-sheet'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'balance-sheet'] })
+      const kind = entry.purchaseId
+        ? 'vendor payment'
+        : entry.outstanding < 0
+          ? 'credit payment'
+          : 'ledger payment'
+      logActivity({
+        type: 'ledger.payment_recorded',
+        description: `Recorded ${kind} of ₹${amount} for ${entry.name || 'customer'} (${mode})`,
+        entityType: 'ledger',
+        entityId: entry.purchaseId || entry.customerId || entry.key,
+        entityLabel: entry.name,
+        customerId: entry.customerId,
+        customerName: entry.name,
+        meta: {
+          amount,
+          paymentMode: mode,
+          outstandingBefore: entry.outstanding,
+          ...(entry.purchaseId ? { purchaseId: entry.purchaseId } : {}),
+          ...(remarks?.trim() ? { remarks: remarks.trim() } : {}),
+        },
+      })
       toast.success(
         entry.purchaseId
           ? 'Vendor payment recorded'

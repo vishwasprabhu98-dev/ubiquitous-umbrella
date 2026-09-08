@@ -28,6 +28,7 @@ import { orderRepository } from '@/firebase/repositories/orderRepository'
 import { customerRepository } from '@/firebase/repositories/customerRepository'
 import { productRepository } from '@/firebase/repositories/productRepository'
 import { pricingRepository } from '@/firebase/repositories/pricingRepository'
+import { logActivity, formatActivityItems } from '@/firebase/repositories/activityLogRepository'
 import { billRepository } from '@/firebase/repositories/billRepository'
 import { transactionRepository } from '@/firebase/repositories/transactionRepository'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
@@ -419,12 +420,13 @@ export default function OrdersPage() {
       const orderNumber = await orderRepository.generateOrderNumber()
       const isExisting = data.customerType === 'existing'
       const customer = isExisting ? customers.find((c) => c.customerId === data.customerId) : null
-      await orderRepository.create({
+      const customerName = isExisting ? (customer?.name ?? data.customerName) : data.customerName
+      const created = await orderRepository.create({
         orderNumber,
         customerId: data.customerId ?? '',
         customerInfo: {
           customerId: data.customerId,
-          name: isExisting ? (customer?.name ?? data.customerName) : data.customerName,
+          name: customerName,
           phone: isExisting ? (customer?.phone ?? data.customerPhone) : data.customerPhone,
           gstNumber: isExisting ? customer?.gstNumber : (data.customerGst ?? undefined),
         },
@@ -444,9 +446,23 @@ export default function OrdersPage() {
         timeSlot: data.timeSlot || 'MORNING',
         ...(data.comment?.trim() ? { comment: data.comment.trim() } : {}),
       })
+      return { created, customerName, orderNumber, itemsSummary: formatActivityItems(created.items) }
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      logActivity({
+        type: 'order.created',
+        description: `Created order ${result.orderNumber} for ${result.customerName || 'customer'} — est. ₹${result.created.estimatedAmount}${
+          result.itemsSummary ? ` · Items: ${result.itemsSummary}` : ''
+        }`,
+        entityType: 'order',
+        entityId: result.created.orderId,
+        entityLabel: result.orderNumber,
+        customerId: result.created.customerId || undefined,
+        customerName: result.customerName,
+        itemsSummary: result.itemsSummary || undefined,
+        meta: { estimatedAmount: result.created.estimatedAmount, status: result.created.status },
+      })
       toast.success('Order created successfully!')
       closeCreate()
     },
@@ -455,9 +471,19 @@ export default function OrdersPage() {
 
   const updateStatusMutation = useMutation({
     mutationFn: ({ order, status }: { order: Order; status: OrderStatus }) =>
-      orderRepository.updateStatus(order.orderId, status),
-    onSuccess: (_data, vars) => {
+      orderRepository.updateStatus(order.orderId, status).then(() => ({ order, status })),
+    onSuccess: (vars) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      logActivity({
+        type: 'order.status_changed',
+        description: `Changed order ${vars.order.orderNumber} status to ${vars.status}`,
+        entityType: 'order',
+        entityId: vars.order.orderId,
+        entityLabel: vars.order.orderNumber,
+        customerId: vars.order.customerId || undefined,
+        customerName: vars.order.customerInfo?.name,
+        meta: { fromStatus: vars.order.status, toStatus: vars.status },
+      })
       toast.success('Order status updated')
       if (vars.status === 'DELIVERED' && !vars.order.billId) {
         setDeliverConvertPrompt({ ...vars.order, status: 'DELIVERED' })
@@ -478,21 +504,24 @@ export default function OrdersPage() {
     mutationFn: async ({ orderId, data }: { orderId: string; data: OrderFormData }) => {
       const isExisting = data.customerType === 'existing'
       const customer = isExisting ? customers.find((c) => c.customerId === data.customerId) : null
+      const customerName = isExisting ? (customer?.name ?? data.customerName) : data.customerName
+      const existing = orders.find((o) => o.orderId === orderId)
+      const itemsAfter = data.items.map((item) => ({
+        ...item,
+        quantity: Number(item.quantity),
+        unitRate: Number(item.unitRate),
+        gstPercentage: 0,
+        total: Number(item.quantity) * Number(item.unitRate),
+      }))
       await orderRepository.update(orderId, {
         customerId: data.customerId ?? '',
         customerInfo: {
           customerId: data.customerId,
-          name: isExisting ? (customer?.name ?? data.customerName) : data.customerName,
+          name: customerName,
           phone: isExisting ? (customer?.phone ?? data.customerPhone) : data.customerPhone,
           gstNumber: isExisting ? customer?.gstNumber : (data.customerGst ?? undefined),
         },
-        items: data.items.map((item) => ({
-          ...item,
-          quantity: Number(item.quantity),
-          unitRate: Number(item.unitRate),
-          gstPercentage: 0,
-          total: Number(item.quantity) * Number(item.unitRate),
-        })),
+        items: itemsAfter,
         estimatedAmount,
         advanceAmount: Math.max(0, Number(data.advanceAmount) || 0),
         advanceMode: data.advanceMode,
@@ -501,9 +530,36 @@ export default function OrdersPage() {
         timeSlot: data.timeSlot || 'MORNING',
         comment: data.comment?.trim() ?? '',
       })
+      const itemsBefore = formatActivityItems(existing?.items)
+      const itemsAfterSummary = formatActivityItems(itemsAfter)
+      return {
+        orderId,
+        orderNumber: existing?.orderNumber,
+        customerId: data.customerId,
+        customerName,
+        estimatedAmount,
+        itemsBefore,
+        itemsAfter: itemsAfterSummary,
+      }
     },
-    onSuccess: () => {
+    onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      const itemsChanged = (updated.itemsBefore || '') !== (updated.itemsAfter || '')
+      logActivity({
+        type: 'order.updated',
+        description: `Updated order ${updated.orderNumber || updated.orderId} for ${updated.customerName || 'customer'}${
+          itemsChanged && updated.itemsAfter ? ` · Items: ${updated.itemsAfter}` : ''
+        }`,
+        entityType: 'order',
+        entityId: updated.orderId,
+        entityLabel: updated.orderNumber,
+        customerId: updated.customerId,
+        customerName: updated.customerName,
+        itemsSummary: updated.itemsAfter || undefined,
+        itemsBefore: itemsChanged ? updated.itemsBefore || undefined : undefined,
+        itemsAfter: itemsChanged ? updated.itemsAfter || undefined : undefined,
+        meta: { estimatedAmount: updated.estimatedAmount },
+      })
       toast.success('Order updated successfully!')
       closeCreate()
     },
@@ -546,16 +602,30 @@ export default function OrdersPage() {
           remarks: order.advanceRemarks?.trim() || autoRemarks,
         })
       }
-      // Mark the order as converted so it cannot be converted again
       await orderRepository.update(order.orderId, { billId: createdBill.billId })
+      return { order, markPaid, createdBill }
     },
-    onSuccess: (_data, vars) => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
       queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
-      toast.success(vars.markPaid ? 'Order converted to paid bill!' : 'Order converted to bill!')
+      logActivity({
+        type: 'order.converted_to_bill',
+        description: `Converted order ${result.order.orderNumber} to bill ${result.createdBill.billNumber}${result.markPaid ? ' (marked paid)' : ''}`,
+        entityType: 'order',
+        entityId: result.order.orderId,
+        entityLabel: result.order.orderNumber,
+        customerId: result.order.customerId || undefined,
+        customerName: result.order.customerInfo?.name,
+        meta: {
+          billId: result.createdBill.billId,
+          billNumber: result.createdBill.billNumber,
+          markPaid: result.markPaid,
+        },
+      })
+      toast.success(result.markPaid ? 'Order converted to paid bill!' : 'Order converted to bill!')
       setDetailOrder(null)
       setDeliverConvertPrompt(null)
     },
@@ -566,9 +636,21 @@ export default function OrdersPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (orderId: string) => orderRepository.delete(orderId),
-    onSuccess: () => {
+    mutationFn: async (order: Order) => {
+      await orderRepository.delete(order.orderId)
+      return order
+    },
+    onSuccess: (order) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      logActivity({
+        type: 'order.deleted',
+        description: `Deleted order ${order.orderNumber} for ${order.customerInfo?.name || 'customer'}`,
+        entityType: 'order',
+        entityId: order.orderId,
+        entityLabel: order.orderNumber,
+        customerId: order.customerId || undefined,
+        customerName: order.customerInfo?.name,
+      })
       toast.success('Order deleted')
       setDeleteOrder(null)
       setDetailOrder(null)
@@ -1501,7 +1583,7 @@ export default function OrdersPage() {
             </Button>
             <Button
               variant="destructive"
-              onClick={() => deleteOrder && deleteMutation.mutate(deleteOrder.orderId)}
+              onClick={() => deleteOrder && deleteMutation.mutate(deleteOrder)}
               disabled={deleteMutation.isPending}
             >
               {deleteMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

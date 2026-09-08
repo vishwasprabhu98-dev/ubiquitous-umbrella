@@ -7,6 +7,7 @@ import { Plus, Search, Edit2, Trash2, Loader2, Package, Star } from 'lucide-reac
 import { toast } from 'sonner'
 import { productRepository } from '@/firebase/repositories/productRepository'
 import { getFirestoreErrorMessage } from '@/lib/firestoreUtils'
+import { logActivity } from '@/firebase/repositories/activityLogRepository'
 import { sortProductsForSelect } from '@/lib/products'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,8 +60,16 @@ export default function ProductManagement() {
 
   const createMutation = useMutation({
     mutationFn: (data: ProductFormData) => productRepository.create(data),
-    onSuccess: () => {
+    onSuccess: (product) => {
       queryClient.invalidateQueries({ queryKey: ['products'] })
+      logActivity({
+        type: 'settings.product_created',
+        description: `Created product ${product.productName} — ₹${product.basePrice}/${product.unit}`,
+        entityType: 'product',
+        entityId: product.productId,
+        entityLabel: product.productName,
+        meta: { basePrice: product.basePrice, unit: product.unit },
+      })
       toast.success('Product created successfully')
       closeDialog()
     },
@@ -69,9 +78,16 @@ export default function ProductManagement() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<ProductFormData> }) =>
-      productRepository.update(id, data),
-    onSuccess: () => {
+      productRepository.update(id, data).then(() => ({ id, data })),
+    onSuccess: ({ id, data }) => {
       queryClient.invalidateQueries({ queryKey: ['products'] })
+      logActivity({
+        type: 'settings.product_updated',
+        description: `Updated product ${data.productName || id}`,
+        entityType: 'product',
+        entityId: id,
+        entityLabel: data.productName,
+      })
       toast.success('Product updated successfully')
       closeDialog()
     },
@@ -79,9 +95,20 @@ export default function ProductManagement() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => productRepository.delete(id),
-    onSuccess: () => {
+    mutationFn: async (id: string) => {
+      const product = products.find((p) => p.productId === id)
+      await productRepository.delete(id)
+      return product
+    },
+    onSuccess: (product) => {
       queryClient.invalidateQueries({ queryKey: ['products'] })
+      logActivity({
+        type: 'settings.product_deleted',
+        description: `Deleted product ${product?.productName || 'unknown'}`,
+        entityType: 'product',
+        entityId: product?.productId || 'unknown',
+        entityLabel: product?.productName,
+      })
       toast.success('Product deleted')
       setDeleteId(null)
     },
