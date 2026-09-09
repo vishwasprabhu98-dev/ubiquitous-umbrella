@@ -14,7 +14,6 @@ import {
   Edit2,
   CreditCard,
   Filter,
-  X,
   BookOpen,
   Undo2,
   Share2,
@@ -173,18 +172,18 @@ function BillCard({
           onClick={(e) => e.stopPropagation()}
         >
           {!isPaid && (
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => onEdit(bill)}>
-              <Edit2 className="h-3 w-3" /> Edit
+            <Button variant="outline" size="sm" className="h-9 text-xs gap-1 sm:h-7" onClick={() => onEdit(bill)}>
+              <Edit2 className="h-3.5 w-3.5 sm:h-3 sm:w-3" /> Edit
             </Button>
           )}
           {!bill.movedToLedger && bill.remainingAmount > 0 && (
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs gap-1 border-green-200 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-400 dark:hover:bg-green-950"
+              className="h-9 text-xs gap-1 sm:h-7 border-green-200 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-400 dark:hover:bg-green-950"
               onClick={() => onPayment(bill)}
             >
-              <CreditCard className="h-3 w-3" /> Pay
+              <CreditCard className="h-3.5 w-3.5 sm:h-3 sm:w-3" /> Pay
             </Button>
           )}
           {/* Move to Ledger — only for existing (registered) customers with outstanding amount */}
@@ -192,14 +191,14 @@ function BillCard({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs gap-1 border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-950"
+              className="h-9 text-xs gap-1 sm:h-7 border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-950"
               disabled={ledgerActionPending}
               onClick={() => onMoveToLedger(bill)}
             >
               {ledgerActionPending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 sm:h-3 sm:w-3 animate-spin" />
               ) : (
-                <BookOpen className="h-3 w-3" />
+                <BookOpen className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
               )}
               Move to Ledger
             </Button>
@@ -208,14 +207,14 @@ function BillCard({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs gap-1 border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900"
+              className="h-9 text-xs gap-1 sm:h-7 border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900"
               disabled={ledgerActionPending}
               onClick={() => onRemoveFromLedger(bill)}
             >
               {ledgerActionPending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 sm:h-3 sm:w-3 animate-spin" />
               ) : (
-                <Undo2 className="h-3 w-3" />
+                <Undo2 className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
               )}
               Remove from Ledger
             </Button>
@@ -288,12 +287,6 @@ export default function BillingPage() {
       setFilterSingle('')
       setFilterDateMode('range')
     }
-  }
-
-  const resetFilters = () => {
-    applyPreset('last7')
-    setFilterPayStatus('UNPAID')
-    setSearch('')
   }
 
   const activeFilterCount = useMemo(() => {
@@ -474,7 +467,13 @@ export default function BillingPage() {
       return
     }
 
-    const payload: BillFormData = { ...data, customerName, customerPhone }
+    const items = data.items.filter((item) => (Number(item.quantity) || 0) > 0)
+    if (items.length === 0) {
+      toast.error('Add at least one item with quantity greater than 0')
+      return
+    }
+
+    const payload: BillFormData = { ...data, customerName, customerPhone, items }
 
     if (formMode === 'edit') {
       await updateMutation.mutateAsync(payload)
@@ -493,7 +492,20 @@ export default function BillingPage() {
   const createMutation = useMutation({
     mutationFn: async (data: BillFormData) => {
       const billNumber = await billRepository.generateBillNumber()
-      const grand = grandTotal
+      const items = data.items
+        .filter((item) => (Number(item.quantity) || 0) > 0)
+        .map((item) => ({
+          ...item,
+          quantity: Number(item.quantity),
+          unitRate: Number(item.unitRate),
+          itemDiscount: Number(item.itemDiscount),
+          gstPercentage: 0,
+          total: Number(item.quantity) * Number(item.unitRate) - Number(item.itemDiscount),
+        }))
+      const itemsSubtotal = items.reduce((sum, item) => sum + item.total, 0)
+      const itemsGst = data.isGstBill ? itemsSubtotal * (compositionGstRate / 100) : 0
+      const discount = Number(data.discount) || 0
+      const grand = itemsSubtotal + itemsGst - discount
       const amtPaid = Number(data.amountPaid) || 0
       const remaining = grand - amtPaid
       const paymentStatus = remaining <= 0 ? 'PAID' : amtPaid > 0 ? 'PARTIAL' : 'UNPAID'
@@ -506,17 +518,10 @@ export default function BillingPage() {
           phone: data.customerPhone,
           gstNumber: data.customerGst,
         },
-        items: data.items.map((item) => ({
-          ...item,
-          quantity: Number(item.quantity),
-          unitRate: Number(item.unitRate),
-          itemDiscount: Number(item.itemDiscount),
-          gstPercentage: 0,
-          total: Number(item.quantity) * Number(item.unitRate) - Number(item.itemDiscount),
-        })),
-        subtotal,
-        discount: Number(data.discount) || 0,
-        gstAmount,
+        items,
+        subtotal: itemsSubtotal,
+        discount,
+        gstAmount: itemsGst,
         grandTotal: grand,
         isGstBill: data.isGstBill,
         status: statusFromPayment(paymentStatus),
@@ -560,18 +565,23 @@ export default function BillingPage() {
   const updateMutation = useMutation({
     mutationFn: async (data: BillFormData) => {
       if (!editingBill) return
-      const grand = grandTotal
+      const itemsAfter = data.items
+        .filter((item) => (Number(item.quantity) || 0) > 0)
+        .map((item) => ({
+          ...item,
+          quantity: Number(item.quantity),
+          unitRate: Number(item.unitRate),
+          itemDiscount: Number(item.itemDiscount),
+          gstPercentage: 0,
+          total: Number(item.quantity) * Number(item.unitRate) - Number(item.itemDiscount),
+        }))
+      const itemsSubtotal = itemsAfter.reduce((sum, item) => sum + item.total, 0)
+      const itemsGst = data.isGstBill ? itemsSubtotal * (compositionGstRate / 100) : 0
+      const discount = Number(data.discount) || 0
+      const grand = itemsSubtotal + itemsGst - discount
       const amtPaid = Number(data.amountPaid) || 0
       const remaining = Math.max(0, grand - amtPaid)
       const paymentStatus = remaining <= 0 ? 'PAID' : amtPaid > 0 ? 'PARTIAL' : 'UNPAID'
-      const itemsAfter = data.items.map((item) => ({
-        ...item,
-        quantity: Number(item.quantity),
-        unitRate: Number(item.unitRate),
-        itemDiscount: Number(item.itemDiscount),
-        gstPercentage: 0,
-        total: Number(item.quantity) * Number(item.unitRate) - Number(item.itemDiscount),
-      }))
       await billRepository.update(editingBill.billId, {
         customerInfo: {
           customerId: data.customerId,
@@ -580,9 +590,9 @@ export default function BillingPage() {
           gstNumber: data.customerGst,
         },
         items: itemsAfter,
-        subtotal,
-        discount: Number(data.discount) || 0,
-        gstAmount,
+        subtotal: itemsSubtotal,
+        discount,
+        gstAmount: itemsGst,
         grandTotal: grand,
         isGstBill: data.isGstBill,
         status: statusFromPayment(paymentStatus),
@@ -869,13 +879,6 @@ export default function BillingPage() {
               </span>
             )}
           </Button>
-
-          {(activeFilterCount > 0 || search) && (
-            <Button variant="ghost" size="sm" className="h-9 text-gray-500" onClick={resetFilters}>
-              <X className="h-3.5 w-3.5 mr-1" />
-              Reset
-            </Button>
-          )}
         </div>
 
         {/* Filter panel */}
@@ -1484,7 +1487,14 @@ export default function BillingPage() {
                           {formMode === 'edit' ? 'Amount Paid (₹)' : 'Amount Paid Now (₹)'}
                         </Label>
                         <Controller control={control} name="amountPaid" render={({ field }) => (
-                          <NumericInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} placeholder="0.00" className="h-8" />
+                          <NumericInput
+                            value={field.value}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
+                            placeholder="0.00"
+                            className="h-8"
+                            disabled={formMode === 'edit'}
+                          />
                         )} />
                         {formMode === 'edit' && (
                           <p className="text-xs text-gray-400">
@@ -1658,38 +1668,6 @@ export default function BillingPage() {
               )}
               <Button
                 variant="outline"
-                disabled={printingReceipt || sharingPdf || shopProfileLoading}
-                title={shopProfileLoading ? 'Loading invoice…' : 'Print to 58mm BLE thermal printer'}
-                onClick={async () => {
-                  setPrintingReceipt(true)
-                  try {
-                    await printBillToBlePrinter(viewBill, shopProfile)
-                    logActivity({
-                      type: 'bill.printed',
-                      description: `Printed thermal receipt for bill ${viewBill.billNumber}`,
-                      entityType: 'bill',
-                      entityId: viewBill.billId,
-                      entityLabel: viewBill.billNumber,
-                      customerId: viewBill.customerId,
-                      customerName: viewBill.customerInfo?.name,
-                    })
-                    toast.success('Receipt sent to printer')
-                  } catch (err) {
-                    if (err instanceof Error && err.name === 'NotFoundError') {
-                      toast.info('Printer selection was cancelled')
-                    } else {
-                      toast.error(err instanceof Error ? err.message : 'Failed to print receipt')
-                    }
-                  } finally {
-                    setPrintingReceipt(false)
-                  }
-                }}
-              >
-                {printingReceipt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                Print 58mm
-              </Button>
-              <Button
-                variant="outline"
                 disabled={sharingPdf || shopProfileLoading}
                 title={shopProfileLoading ? 'Loading invoice…' : undefined}
                 onClick={async () => {
@@ -1790,6 +1768,38 @@ export default function BillingPage() {
               >
                 {sharingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
                 WhatsApp
+              </Button>
+              <Button
+                variant="outline"
+                disabled={printingReceipt || sharingPdf || shopProfileLoading}
+                title={shopProfileLoading ? 'Loading invoice…' : 'Print to 58mm BLE thermal printer'}
+                onClick={async () => {
+                  setPrintingReceipt(true)
+                  try {
+                    await printBillToBlePrinter(viewBill, shopProfile)
+                    logActivity({
+                      type: 'bill.printed',
+                      description: `Printed thermal receipt for bill ${viewBill.billNumber}`,
+                      entityType: 'bill',
+                      entityId: viewBill.billId,
+                      entityLabel: viewBill.billNumber,
+                      customerId: viewBill.customerId,
+                      customerName: viewBill.customerInfo?.name,
+                    })
+                    toast.success('Receipt sent to printer')
+                  } catch (err) {
+                    if (err instanceof Error && err.name === 'NotFoundError') {
+                      toast.info('Printer selection was cancelled')
+                    } else {
+                      toast.error(err instanceof Error ? err.message : 'Failed to print receipt')
+                    }
+                  } finally {
+                    setPrintingReceipt(false)
+                  }
+                }}
+              >
+                {printingReceipt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                Print 58mm
               </Button>
             </DialogFooter>
           </DialogContent>

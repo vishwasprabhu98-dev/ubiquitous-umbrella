@@ -14,7 +14,6 @@ import {
   Truck,
   Package,
   Filter,
-  X,
   Receipt,
   Share2,
   MessageCircle,
@@ -326,12 +325,19 @@ export default function OrdersPage() {
       return
     }
 
+    const items = data.items.filter((item) => (Number(item.quantity) || 0) > 0)
+    if (items.length === 0) {
+      toast.error('Add at least one item with quantity greater than 0')
+      return
+    }
+
     const payload: OrderFormData = {
       ...data,
       customerName,
       customerPhone,
       advanceAmount,
       advanceRemarks: data.advanceRemarks?.trim() ?? '',
+      items,
     }
 
     if (editOrder) {
@@ -400,12 +406,6 @@ export default function OrdersPage() {
     }
   }
 
-  const resetFilters = () => {
-    applyPreset('last7next7')
-    setFilterStatus('ALL')
-    setSearch('')
-  }
-
   const activeFilterCount = useMemo(() => {
     let count = 0
     if (datePreset !== 'last7next7') count++
@@ -430,14 +430,18 @@ export default function OrdersPage() {
           phone: isExisting ? (customer?.phone ?? data.customerPhone) : data.customerPhone,
           gstNumber: isExisting ? customer?.gstNumber : (data.customerGst ?? undefined),
         },
-        items: data.items.map((item) => ({
-          ...item,
-          quantity: Number(item.quantity),
-          unitRate: Number(item.unitRate),
-          gstPercentage: 0,
-          total: Number(item.quantity) * Number(item.unitRate),
-        })),
-        estimatedAmount,
+        items: data.items
+          .filter((item) => (Number(item.quantity) || 0) > 0)
+          .map((item) => ({
+            ...item,
+            quantity: Number(item.quantity),
+            unitRate: Number(item.unitRate),
+            gstPercentage: 0,
+            total: Number(item.quantity) * Number(item.unitRate),
+          })),
+        estimatedAmount: data.items
+          .filter((item) => (Number(item.quantity) || 0) > 0)
+          .reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitRate), 0),
         advanceAmount: Math.max(0, Number(data.advanceAmount) || 0),
         advanceMode: data.advanceMode,
         ...(data.advanceRemarks?.trim() ? { advanceRemarks: data.advanceRemarks.trim() } : {}),
@@ -485,9 +489,6 @@ export default function OrdersPage() {
         meta: { fromStatus: vars.order.status, toStatus: vars.status },
       })
       toast.success('Order status updated')
-      if (vars.status === 'DELIVERED' && !vars.order.billId) {
-        setDeliverConvertPrompt({ ...vars.order, status: 'DELIVERED' })
-      }
     },
     onError: () => toast.error('Failed to update status'),
   })
@@ -495,6 +496,10 @@ export default function OrdersPage() {
   const requestStatusChange = (order: Order, status: OrderStatus) => {
     if (status === 'REJECTED') {
       setRejectConfirm({ order, status })
+      return
+    }
+    if (status === 'DELIVERED') {
+      setDeliverConvertPrompt(order)
       return
     }
     updateStatusMutation.mutate({ order, status })
@@ -506,13 +511,16 @@ export default function OrdersPage() {
       const customer = isExisting ? customers.find((c) => c.customerId === data.customerId) : null
       const customerName = isExisting ? (customer?.name ?? data.customerName) : data.customerName
       const existing = orders.find((o) => o.orderId === orderId)
-      const itemsAfter = data.items.map((item) => ({
-        ...item,
-        quantity: Number(item.quantity),
-        unitRate: Number(item.unitRate),
-        gstPercentage: 0,
-        total: Number(item.quantity) * Number(item.unitRate),
-      }))
+      const itemsAfter = data.items
+        .filter((item) => (Number(item.quantity) || 0) > 0)
+        .map((item) => ({
+          ...item,
+          quantity: Number(item.quantity),
+          unitRate: Number(item.unitRate),
+          gstPercentage: 0,
+          total: Number(item.quantity) * Number(item.unitRate),
+        }))
+      const nextEstimated = itemsAfter.reduce((sum, item) => sum + item.total, 0)
       await orderRepository.update(orderId, {
         customerId: data.customerId ?? '',
         customerInfo: {
@@ -522,7 +530,7 @@ export default function OrdersPage() {
           gstNumber: isExisting ? customer?.gstNumber : (data.customerGst ?? undefined),
         },
         items: itemsAfter,
-        estimatedAmount,
+        estimatedAmount: nextEstimated,
         advanceAmount: Math.max(0, Number(data.advanceAmount) || 0),
         advanceMode: data.advanceMode,
         advanceRemarks: data.advanceRemarks?.trim() ?? '',
@@ -537,7 +545,7 @@ export default function OrdersPage() {
         orderNumber: existing?.orderNumber,
         customerId: data.customerId,
         customerName,
-        estimatedAmount,
+        estimatedAmount: nextEstimated,
         itemsBefore,
         itemsAfter: itemsAfterSummary,
       }
@@ -567,7 +575,18 @@ export default function OrdersPage() {
   })
 
   const convertToBillMutation = useMutation({
-    mutationFn: async ({ order, markPaid }: { order: Order; markPaid: boolean }) => {
+    mutationFn: async ({
+      order,
+      markPaid,
+      markDelivered,
+    }: {
+      order: Order
+      markPaid: boolean
+      markDelivered?: boolean
+    }) => {
+      if (markDelivered && order.status !== 'DELIVERED') {
+        await orderRepository.updateStatus(order.orderId, 'DELIVERED')
+      }
       const billNumber = await billRepository.generateBillNumber()
       const subtotal = order.items.reduce((s, i) => s + i.quantity * i.unitRate, 0)
       const orderAdvance = Math.min(Math.max(0, order.advanceAmount ?? 0), subtotal)
@@ -603,7 +622,7 @@ export default function OrdersPage() {
         })
       }
       await orderRepository.update(order.orderId, { billId: createdBill.billId })
-      return { order, markPaid, createdBill }
+      return { order, markPaid, createdBill, markDelivered: !!markDelivered }
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['bills'] })
@@ -611,6 +630,18 @@ export default function OrdersPage() {
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      if (result.markDelivered) {
+        logActivity({
+          type: 'order.status_changed',
+          description: `Changed order ${result.order.orderNumber} status to DELIVERED`,
+          entityType: 'order',
+          entityId: result.order.orderId,
+          entityLabel: result.order.orderNumber,
+          customerId: result.order.customerId || undefined,
+          customerName: result.order.customerInfo?.name,
+          meta: { fromStatus: result.order.status, toStatus: 'DELIVERED' },
+        })
+      }
       logActivity({
         type: 'order.converted_to_bill',
         description: `Converted order ${result.order.orderNumber} to bill ${result.createdBill.billNumber}${result.markPaid ? ' (marked paid)' : ''}`,
@@ -780,13 +811,6 @@ export default function OrdersPage() {
               </span>
             )}
           </Button>
-
-          {(activeFilterCount > 0 || search) && (
-            <Button variant="ghost" size="sm" className="h-9 text-gray-500" onClick={resetFilters}>
-              <X className="h-3.5 w-3.5 mr-1" />
-              Reset
-            </Button>
-          )}
         </div>
 
         {/* Filter Panel */}
@@ -1416,37 +1440,49 @@ export default function OrdersPage() {
 
             <OrderView order={detailOrder} />
 
-            <DialogFooter className="print:hidden flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={sharingPdf || shopProfileLoading}
-                onClick={async () => {
-                  setSharingPdf(true)
-                  try {
-                    const blob = await createOrderPdfBlob(detailOrder, shopProfile)
-                    await sharePdfBlob({
-                      blob,
-                      filename: `order-${detailOrder.orderNumber}.pdf`,
-                      title: `Order ${detailOrder.orderNumber}`,
-                      onFallback: (msg) => toast.info(msg),
-                    })
-                  } catch (err) {
-                    if (err instanceof Error && err.name !== 'AbortError') {
-                      toast.error('Failed to share order')
-                    }
-                  } finally {
-                    setSharingPdf(false)
-                  }
-                }}
-              >
-                {sharingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
-                Share
-              </Button>
+            <DialogFooter className="print:hidden">
+              {detailOrder.status !== 'DELIVERED' && detailOrder.status !== 'REJECTED' && (
+                <Button
+                  variant="outline"
+                  onClick={() => openEdit(detailOrder)}
+                >
+                  <Edit2 className="h-4 w-4" />
+                  Edit Order
+                </Button>
+              )}
+
+              {detailOrder.status !== 'REJECTED' && (
+                <>
+                  <Button
+                    onClick={() => convertToBillMutation.mutate({ order: detailOrder, markPaid: false })}
+                    disabled={convertToBillMutation.isPending || !!detailOrder.billId}
+                    title={detailOrder.billId ? `Already converted to bill ${detailOrder.billId}` : undefined}
+                  >
+                    {convertToBillMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4" />
+                    )}
+                    {detailOrder.billId ? 'Already Billed' : 'Convert to Bill'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => convertToBillMutation.mutate({ order: detailOrder, markPaid: true })}
+                    disabled={convertToBillMutation.isPending || !!detailOrder.billId}
+                    title={detailOrder.billId ? `Already converted to bill ${detailOrder.billId}` : undefined}
+                  >
+                    {convertToBillMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Receipt className="h-4 w-4" />
+                    )}
+                    Convert to Paid Bill
+                  </Button>
+                </>
+              )}
 
               <Button
                 variant="outline"
-                size="sm"
                 disabled={sharingPdf || shopProfileLoading}
                 onClick={async () => {
                   setSharingPdf(true)
@@ -1473,52 +1509,34 @@ export default function OrdersPage() {
                 WhatsApp
               </Button>
 
-              {detailOrder.status !== 'DELIVERED' && detailOrder.status !== 'REJECTED' && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openEdit(detailOrder)}
-                >
-                  <Edit2 className="h-4 w-4" />
-                  Edit Order
-                </Button>
-              )}
-
-              {detailOrder.status !== 'REJECTED' && (
-                <>
-                  <Button
-                    size="sm"
-                    onClick={() => convertToBillMutation.mutate({ order: detailOrder, markPaid: false })}
-                    disabled={convertToBillMutation.isPending || !!detailOrder.billId}
-                    title={detailOrder.billId ? `Already converted to bill ${detailOrder.billId}` : undefined}
-                  >
-                    {convertToBillMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ArrowRight className="h-4 w-4" />
-                    )}
-                    {detailOrder.billId ? 'Already Billed' : 'Convert to Bill'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => convertToBillMutation.mutate({ order: detailOrder, markPaid: true })}
-                    disabled={convertToBillMutation.isPending || !!detailOrder.billId}
-                    title={detailOrder.billId ? `Already converted to bill ${detailOrder.billId}` : undefined}
-                  >
-                    {convertToBillMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Receipt className="h-4 w-4" />
-                    )}
-                    Convert to Paid Bill
-                  </Button>
-                </>
-              )}
+              <Button
+                variant="outline"
+                disabled={sharingPdf || shopProfileLoading}
+                onClick={async () => {
+                  setSharingPdf(true)
+                  try {
+                    const blob = await createOrderPdfBlob(detailOrder, shopProfile)
+                    await sharePdfBlob({
+                      blob,
+                      filename: `order-${detailOrder.orderNumber}.pdf`,
+                      title: `Order ${detailOrder.orderNumber}`,
+                      onFallback: (msg) => toast.info(msg),
+                    })
+                  } catch (err) {
+                    if (err instanceof Error && err.name !== 'AbortError') {
+                      toast.error('Failed to share order')
+                    }
+                  } finally {
+                    setSharingPdf(false)
+                  }
+                }}
+              >
+                {sharingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+                Share
+              </Button>
 
               <Button
                 variant="destructive"
-                size="sm"
                 onClick={() => setDeleteOrder(detailOrder)}
               >
                 <Trash2 className="h-4 w-4" />
@@ -1565,43 +1583,82 @@ export default function OrdersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Deliver → Convert to Bill prompt ── */}
+      {/* ── Deliver confirmation (before status change) ── */}
       <Dialog open={!!deliverConvertPrompt} onOpenChange={(open) => { if (!open) setDeliverConvertPrompt(null) }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Receipt className="h-5 w-5 text-blue-600" />
-              Convert to Bill?
+              <Truck className="h-5 w-5 text-green-600" />
+              Mark as Delivered?
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Order{' '}
+            Confirm delivery for order{' '}
             <strong className="text-gray-900 dark:text-white">{deliverConvertPrompt?.orderNumber}</strong> for{' '}
-            <strong className="text-gray-900 dark:text-white">{deliverConvertPrompt?.customerInfo.name}</strong>{' '}
-            is marked delivered and has not been billed yet. Convert it to a bill now?
+            <strong className="text-gray-900 dark:text-white">{deliverConvertPrompt?.customerInfo.name}</strong>.
+            {!deliverConvertPrompt?.billId && (
+              <> You can also convert it to a bill now.</>
+            )}
           </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeliverConvertPrompt(null)} disabled={convertToBillMutation.isPending}>
-              Cancel
-            </Button>
+          <DialogFooter className="sm:!flex-col">
+            {!deliverConvertPrompt?.billId && (
+              <>
+                <Button
+                  onClick={() => {
+                    if (deliverConvertPrompt) {
+                      convertToBillMutation.mutate({
+                        order: deliverConvertPrompt,
+                        markPaid: false,
+                        markDelivered: true,
+                      })
+                    }
+                  }}
+                  disabled={convertToBillMutation.isPending || updateStatusMutation.isPending}
+                >
+                  {(convertToBillMutation.isPending || updateStatusMutation.isPending) && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  Convert to Bill
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (deliverConvertPrompt) {
+                      convertToBillMutation.mutate({
+                        order: deliverConvertPrompt,
+                        markPaid: true,
+                        markDelivered: true,
+                      })
+                    }
+                  }}
+                  disabled={convertToBillMutation.isPending || updateStatusMutation.isPending}
+                >
+                  {(convertToBillMutation.isPending || updateStatusMutation.isPending) && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  Convert to Paid Bill
+                </Button>
+              </>
+            )}
             <Button
               variant="outline"
               onClick={() => {
-                if (deliverConvertPrompt) convertToBillMutation.mutate({ order: deliverConvertPrompt, markPaid: false })
+                if (deliverConvertPrompt) {
+                  updateStatusMutation.mutate({ order: deliverConvertPrompt, status: 'DELIVERED' })
+                  setDeliverConvertPrompt(null)
+                }
               }}
-              disabled={convertToBillMutation.isPending}
+              disabled={convertToBillMutation.isPending || updateStatusMutation.isPending}
             >
-              {convertToBillMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Convert to Bill
+              {updateStatusMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Mark Delivered Only
             </Button>
             <Button
-              onClick={() => {
-                if (deliverConvertPrompt) convertToBillMutation.mutate({ order: deliverConvertPrompt, markPaid: true })
-              }}
-              disabled={convertToBillMutation.isPending}
+              variant="ghost"
+              onClick={() => setDeliverConvertPrompt(null)}
+              disabled={convertToBillMutation.isPending || updateStatusMutation.isPending}
             >
-              {convertToBillMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Convert to Paid Bill
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>

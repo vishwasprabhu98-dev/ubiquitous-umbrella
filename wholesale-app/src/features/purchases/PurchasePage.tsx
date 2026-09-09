@@ -175,6 +175,17 @@ export default function PurchasePage() {
     const isCustomer = data.vendorType === 'customer'
     const customer = isCustomer ? customers.find((c) => c.customerId === data.customerId) : null
     const existingPaid = editingPurchase?.amountPaid ?? 0
+    const items = data.items
+      .filter((item) => (Number(item.quantity) || 0) > 0)
+      .map((item) => ({
+        ...item,
+        quantity: Number(item.quantity),
+        unitRate: Number(item.unitRate),
+        total: Number(item.quantity) * Number(item.unitRate),
+      }))
+    const itemsSubtotal = items.reduce((sum, item) => sum + item.total, 0)
+    const discount = watchDiscount
+    const total = Math.max(0, itemsSubtotal - discount)
     const payload = {
       status,
       vendorType: data.vendorType,
@@ -184,15 +195,10 @@ export default function PurchasePage() {
         phone: isCustomer ? (customer?.phone ?? data.vendorPhone.trim()) : data.vendorPhone.trim(),
         gstNumber: isCustomer ? customer?.gstNumber : (data.vendorGst?.trim() || undefined),
       },
-      items: data.items.map((item) => ({
-        ...item,
-        quantity: Number(item.quantity),
-        unitRate: Number(item.unitRate),
-        total: Number(item.quantity) * Number(item.unitRate),
-      })),
-      subtotal,
-      discount: watchDiscount,
-      grandTotal,
+      items,
+      subtotal: itemsSubtotal,
+      discount,
+      grandTotal: total,
       purchaseDate: data.purchaseDate || todayStr(),
       ...(data.comment?.trim() ? { comment: data.comment.trim() } : {}),
     }
@@ -200,7 +206,7 @@ export default function PurchasePage() {
       return {
         ...payload,
         amountPaid: existingPaid,
-        remainingAmount: Math.max(0, grandTotal - existingPaid),
+        remainingAmount: Math.max(0, total - existingPaid),
       }
     }
     return payload
@@ -209,6 +215,10 @@ export default function PurchasePage() {
   const saveMutation = useMutation({
     mutationFn: async ({ data, asDraft }: { data: PurchaseFormData; asDraft: boolean }) => {
       if (!validateVendor(data)) throw new Error('validation')
+      if (!data.items.some((item) => (Number(item.quantity) || 0) > 0)) {
+        toast.error('Add at least one item with quantity greater than 0')
+        throw new Error('validation')
+      }
       const payload = buildPayload(data, asDraft ? 'DRAFT' : 'SAVED')
       const vendorName = payload.vendorInfo?.name || 'vendor'
 
