@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Images, Loader2 } from 'lucide-react'
+import { Images, Loader2, MapPin, Phone, Mail, FileText } from 'lucide-react'
 import { catalogProductRepository } from '@/firebase/repositories/catalogProductRepository'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -25,11 +25,24 @@ export default function CatalogPage() {
   })
 
   const shopName = shopProfile?.name?.trim() || 'Shop'
+  const addressParts = [
+    shopProfile?.address,
+    shopProfile?.city,
+    shopProfile?.state,
+    shopProfile?.pincode,
+  ].filter(Boolean)
+  const fullAddress = addressParts.join(', ')
+  const hasFooterDetails =
+    Boolean(shopName) ||
+    Boolean(fullAddress) ||
+    Boolean(shopProfile?.phone?.trim()) ||
+    Boolean(shopProfile?.email?.trim()) ||
+    Boolean(shopProfile?.gstNumber?.trim())
 
   return (
-    <div className="min-h-screen bg-[#f5f6f8]">
+    <div className="flex min-h-screen flex-col bg-[#f5f6f8]">
       <header className="sticky top-0 z-20 border-b border-black/5 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-indigo-600">
               {shopName}
@@ -44,9 +57,9 @@ export default function CatalogPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-10">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-10">
         {isLoading ? (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 min-[640px]:grid-cols-2 min-[1281px]:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="overflow-hidden rounded-3xl bg-white">
                 <Skeleton className="aspect-[3/4] w-full rounded-none" />
@@ -80,7 +93,7 @@ export default function CatalogPage() {
             <p className="text-gray-500">No products in the catalog yet.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 min-[640px]:grid-cols-2 min-[1281px]:grid-cols-3">
             {products.map((product) => (
               <CatalogProductCard
                 key={product.catalogProductId}
@@ -90,6 +103,65 @@ export default function CatalogPage() {
           </div>
         )}
       </main>
+
+      <div className="mt-auto">
+        {hasFooterDetails && (
+          <footer className="border-t border-black/5 bg-white">
+            <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-indigo-600">
+                    Contact
+                  </p>
+                  <h2 className="text-lg font-semibold text-gray-900">{shopName}</h2>
+                  {fullAddress && (
+                    <p className="flex items-start gap-2 text-sm text-gray-500">
+                      <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                      <span>{fullAddress}</span>
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2 text-sm text-gray-600">
+                  {shopProfile?.phone?.trim() && (
+                    <a
+                      href={`tel:${shopProfile.phone.trim()}`}
+                      className="flex items-center gap-2 hover:text-indigo-600"
+                    >
+                      <Phone className="h-4 w-4 shrink-0 text-gray-400" />
+                      {shopProfile.phone.trim()}
+                    </a>
+                  )}
+                  {shopProfile?.email?.trim() && (
+                    <a
+                      href={`mailto:${shopProfile.email.trim()}`}
+                      className="flex items-center gap-2 hover:text-indigo-600"
+                    >
+                      <Mail className="h-4 w-4 shrink-0 text-gray-400" />
+                      {shopProfile.email.trim()}
+                    </a>
+                  )}
+                  {shopProfile?.gstNumber?.trim() && (
+                    <p className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 shrink-0 text-gray-400" />
+                      GST: {shopProfile.gstNumber.trim()}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </footer>
+        )}
+
+        <div className="border-t border-black/5 bg-[#eef0f4]">
+          <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6">
+            <p className="text-center text-xs text-gray-500">
+              Created by{' '}
+              <span className="font-medium text-gray-700">Vishwas</span>
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
