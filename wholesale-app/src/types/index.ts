@@ -306,6 +306,7 @@ export type ActivityEventType =
   | 'bill.shared_pdf'
   | 'bill.printed'
   | 'ledger.payment_recorded'
+  | 'ledger.payment_reminder_sent'
   | 'order.created'
   | 'order.updated'
   | 'order.status_changed'

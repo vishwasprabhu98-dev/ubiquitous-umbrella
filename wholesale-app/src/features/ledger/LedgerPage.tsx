@@ -26,6 +26,7 @@ import {
   ShoppingBag,
   Download,
   MessageCircle,
+  Bell,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn, formatCurrency } from '@/lib/utils'
@@ -50,8 +51,9 @@ import {
   customerBalanceRepository,
   LEDGER_PAYMENT_REF,
 } from '@/firebase/repositories/customerBalanceRepository'
-import { sharePdfBlob, downloadPdfBlob, shareElementAsImage } from '@/lib/sharePdf'
+import { sharePdfBlob, downloadPdfBlob, shareElementAsImage, sharePaymentReminderImage } from '@/lib/sharePdf'
 import { createLedgerPdfBlob, type LedgerPdfRow } from '@/lib/ledgerPdf'
+import PaymentReminderCard from './PaymentReminderCard'
 import {
   buildExistingLedgerFromBalances,
   buildNewCustomerLedger,
@@ -347,12 +349,14 @@ function LedgerTable({
 function LedgerCard({
   entry,
   monthKey,
+  shopName,
   onRecordPayment,
   onShareLedger,
   onViewRow,
 }: {
   entry: CustomerLedgerEntry
   monthKey?: string
+  shopName?: string
   onRecordPayment: (entry: CustomerLedgerEntry) => void
   onShareLedger: (entry: CustomerLedgerEntry) => void
   onViewRow?: (row: LedgerRow, detailBills: Bill[], detailPurchases: PurchaseInvoice[]) => void
@@ -360,6 +364,8 @@ function LedgerCard({
   const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(false)
   const [sharingBusy, setSharingBusy] = useState(false)
+  const [reminderOpen, setReminderOpen] = useState(false)
+  const [reminding, setReminding] = useState(false)
 
   const { data: detail, isLoading: detailLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ledgerDetailQueryKey(entry, monthKey),
@@ -518,6 +524,17 @@ function LedgerCard({
                 Record Payment
               </button>
             )}
+            {hasOutstanding && (
+              <button
+                type="button"
+                onClick={() => setReminderOpen(true)}
+                className="flex items-center justify-center rounded-lg p-1.5 text-xs font-medium border border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/40 transition-colors"
+                title="Payment reminder"
+                aria-label="Payment reminder"
+              >
+                <Bell className="h-3.5 w-3.5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={async () => {
@@ -531,10 +548,11 @@ function LedgerCard({
                   setSharingBusy(false)
                 }
               }}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium border border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/40 transition-colors"
+              className="flex items-center justify-center rounded-lg p-1.5 text-xs font-medium border border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/40 transition-colors"
+              title="Share ledger"
+              aria-label="Share ledger"
             >
               {sharingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Share2 className="h-3.5 w-3.5" />}
-              Share Ledger
             </button>
           </div>
           <button
@@ -589,6 +607,102 @@ function LedgerCard({
           )}
         </div>
       )}
+
+      <Dialog
+        open={reminderOpen}
+        onOpenChange={(open) => {
+          if (!reminding) setReminderOpen(open)
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="h-4 w-4 text-amber-600" />
+              Payment Reminder
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              To <strong className="text-gray-800 dark:text-gray-200">{entry.name}</strong>
+              {entry.phone && entry.phone !== '—' ? ` · ${entry.phone}` : ''}
+            </p>
+            <div className="flex justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-[#2a3040] dark:bg-[#1e2330]">
+              <PaymentReminderCard
+                amount={dueAmount}
+                shopName={shopName?.trim() || 'Shop'}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={reminding}
+              onClick={() => setReminderOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={reminding}
+              onClick={async () => {
+                const phone = entry.phone?.trim()
+                if (!phone || phone === '—') {
+                  toast.error('No phone number available for this customer')
+                  return
+                }
+                const business = shopName?.trim() || 'our shop'
+                const text = [
+                  `Dear ${entry.name},`,
+                  '',
+                  `This is a friendly payment reminder from ${business}.`,
+                  '',
+                  `Your outstanding balance is ${formatCurrency(dueAmount)}.`,
+                  '',
+                  'Thank you.',
+                ].join('\n')
+
+                setReminding(true)
+                try {
+                  await sharePaymentReminderImage({
+                    amount: dueAmount,
+                    shopName: business,
+                    customerName: entry.name,
+                    phone,
+                    text,
+                    onFallback: (msg) => toast.info(msg),
+                  })
+                  logActivity({
+                    type: 'ledger.payment_reminder_sent',
+                    description: `Sent payment reminder to ${entry.name} for ${formatCurrency(dueAmount)}`,
+                    entityType: 'ledger',
+                    entityId: entry.customerId || entry.purchaseId || entry.key,
+                    entityLabel: entry.name,
+                    customerId: entry.customerId || undefined,
+                    customerName: entry.name,
+                    meta: {
+                      outstanding: dueAmount,
+                      phone,
+                    },
+                  })
+                  setReminderOpen(false)
+                } catch (err) {
+                  if (err instanceof Error && err.name !== 'AbortError') {
+                    toast.error('Failed to share payment reminder')
+                  }
+                } finally {
+                  setReminding(false)
+                }
+              }}
+            >
+              {reminding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+              Remind
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -1413,6 +1527,7 @@ export default function LedgerPage() {
                 key={entry.key}
                 entry={entry}
                 monthKey={view === 'existing' ? monthKey : undefined}
+                shopName={shopProfile?.name}
                 onRecordPayment={setPayEntry}
                 onShareLedger={(e) => { setShareFrom(''); setShareTo(''); setShareLedgerEntry(e) }}
                 onViewRow={handleViewLedgerRow}

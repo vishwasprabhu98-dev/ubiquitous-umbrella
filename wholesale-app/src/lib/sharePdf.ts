@@ -163,6 +163,8 @@ function openWhatsAppChat(phone: string | null | undefined, text: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+export { openWhatsAppChat }
+
 /** iOS ignores `<a download>` — open PDF in a new tab so the user can share from the viewer. */
 function openPdfInNewTab(blob: Blob): boolean {
   const url = URL.createObjectURL(blob)
@@ -317,6 +319,143 @@ export async function shareImageBlob(options: {
       ? 'Image saved — attach it in the WhatsApp chat that just opened.'
       : 'Image saved — open WhatsApp and attach it from Downloads.'
   )
+}
+
+function formatReminderAmount(amount: number): string {
+  return `₹ ${new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)}`
+}
+
+function formatReminderAsOf(date: Date): string {
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date)
+}
+
+function fillCenteredTextWithSpacing(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  centerX: number,
+  y: number,
+  letterSpacing: number,
+) {
+  const chars = Array.from(text)
+  const widths = chars.map((ch) => ctx.measureText(ch).width)
+  const total =
+    widths.reduce((sum, w) => sum + w, 0) +
+    letterSpacing * Math.max(0, chars.length - 1)
+  let x = centerX - total / 2
+  const prevAlign = ctx.textAlign
+  ctx.textAlign = 'left'
+  for (let i = 0; i < chars.length; i++) {
+    ctx.fillText(chars[i], x, y)
+    x += widths[i] + letterSpacing
+  }
+  ctx.textAlign = prevAlign
+}
+
+/** Draw a landscape payment-reminder JPEG without html2canvas (avoids CSS/dialog capture failures). */
+export async function createPaymentReminderImageBlob(options: {
+  amount: number
+  shopName: string
+  asOf?: Date
+}): Promise<Blob> {
+  const width = 1280
+  const height = 720
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not create canvas')
+
+  const shop = options.shopName.trim() || 'Shop'
+  const amountLabel = formatReminderAmount(options.amount)
+  const oweLabel = `You owe ${formatReminderAmount(options.amount).replace('₹ ', '₹')} as on ${formatReminderAsOf(options.asOf ?? new Date())}`
+
+  // Soft blush → stone → cool gray gradient
+  const gradient = ctx.createLinearGradient(0, 0, width, height)
+  gradient.addColorStop(0, '#fff5f3')
+  gradient.addColorStop(0.5, '#faf7f5')
+  gradient.addColorStop(1, '#eef2f7')
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, width, height)
+
+  // Border
+  ctx.strokeStyle = '#e5e7eb'
+  ctx.lineWidth = 2
+  ctx.strokeRect(24, 24, width - 48, height - 48)
+
+  // Match PaymentReminderCard: 24px title, text-6xl amount, larger owe — scaled for 1280 canvas
+  const scale = width / 720
+  ctx.fillStyle = '#9ca3af'
+  ctx.font = `600 ${Math.round(24 * scale)}px system-ui, -apple-system, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('PAYMENT REMINDER', width / 2, 150)
+
+  ctx.fillStyle = '#8B1E1E'
+  ctx.font = `700 ${Math.round(60 * scale)}px system-ui, -apple-system, sans-serif`
+  fillCenteredTextWithSpacing(ctx, amountLabel, width / 2, 300, Math.round(4.8 * scale))
+
+  ctx.fillStyle = '#6b7280'
+  ctx.font = `400 ${Math.round(20 * scale)}px system-ui, -apple-system, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.fillText(oweLabel, width / 2, 410)
+
+  // Shop button
+  ctx.font = '600 24px system-ui, -apple-system, sans-serif'
+  const padX = 36
+  const btnTextW = ctx.measureText(shop).width
+  const btnW = btnTextW + padX * 2 + 28
+  const btnH = 56
+  const btnX = (width - btnW) / 2
+  const btnY = 500
+  const radius = 8
+
+  ctx.fillStyle = '#9ca3af'
+  ctx.beginPath()
+  ctx.moveTo(btnX + radius, btnY)
+  ctx.arcTo(btnX + btnW, btnY, btnX + btnW, btnY + btnH, radius)
+  ctx.arcTo(btnX + btnW, btnY + btnH, btnX, btnY + btnH, radius)
+  ctx.arcTo(btnX, btnY + btnH, btnX, btnY, radius)
+  ctx.arcTo(btnX, btnY, btnX + btnW, btnY, radius)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.fillStyle = '#ffffff'
+  ctx.textAlign = 'center'
+  ctx.fillText(shop, width / 2, btnY + btnH / 2)
+
+  return canvasToImageBlob(canvas)
+}
+
+export async function sharePaymentReminderImage(options: {
+  amount: number
+  shopName: string
+  customerName: string
+  phone?: string | null
+  text?: string
+  onFallback?: (message: string) => void
+}): Promise<void> {
+  const blob = await createPaymentReminderImageBlob({
+    amount: options.amount,
+    shopName: options.shopName,
+  })
+  await shareImageBlob({
+    blob,
+    filename: `payment-reminder-${options.customerName.replace(/\s+/g, '-')}.jpg`,
+    title: `Payment reminder — ${options.customerName}`,
+    text: options.text,
+    phone: options.phone,
+    onFallback: options.onFallback,
+  })
 }
 
 export async function downloadPdfBlob(options: {

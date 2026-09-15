@@ -1728,8 +1728,8 @@ export default function BillingPage() {
                           : viewBill.remainingAmount
                     const shareText = [
                       `Bill Amount: ${formatCurrency(viewBill.grandTotal)}`,
-                      `Balance Due: ${formatCurrency(balanceDue)}`,
-                    ].join('\n')
+                      `Total Balance: ${formatCurrency(balanceDue)}`,
+                    ].join('\n\n')
                     await shareElementAsImage({
                       elementId: 'invoice-print',
                       filename: `invoice-${viewBill.billNumber}.jpg`,
