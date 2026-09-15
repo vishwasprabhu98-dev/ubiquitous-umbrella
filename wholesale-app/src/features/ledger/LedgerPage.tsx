@@ -656,11 +656,8 @@ function LedgerCard({
                 const business = shopName?.trim() || 'our shop'
                 const text = [
                   `Dear ${entry.name},`,
-                  '',
                   `This is a friendly payment reminder from ${business}.`,
-                  '',
                   `Your outstanding balance is ${formatCurrency(dueAmount)}.`,
-                  '',
                   'Thank you.',
                 ].join('\n')
 
