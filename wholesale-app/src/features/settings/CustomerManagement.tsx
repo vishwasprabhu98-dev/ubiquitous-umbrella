@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -39,7 +39,13 @@ const customerSchema = z.object({
 
 type FormData = z.infer<typeof customerSchema>
 
-export default function CustomerManagement() {
+export default function CustomerManagement({
+  autoOpenCreate = false,
+  onAutoOpenCreateHandled,
+}: {
+  autoOpenCreate?: boolean
+  onAutoOpenCreateHandled?: () => void
+} = {}) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -132,6 +138,13 @@ export default function CustomerManagement() {
     reset({ openingBalance: 0 })
     setDialogOpen(true)
   }
+
+  useEffect(() => {
+    if (!autoOpenCreate) return
+    openCreate()
+    onAutoOpenCreateHandled?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenCreate])
 
   const openEdit = (customer: Customer) => {
     setEditingCustomer(customer)

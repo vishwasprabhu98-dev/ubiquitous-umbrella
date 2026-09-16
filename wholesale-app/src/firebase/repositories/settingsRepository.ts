@@ -15,6 +15,7 @@ export const DEFAULT_SHOP_PROFILE: ShopProfile = {
   gstNumber: '',
   phone: '',
   email: '',
+  upiId: '',
   compositionGstRate: 1,
 }
 
@@ -109,7 +110,7 @@ export const settingsRepository = {
   async getShopProfile(): Promise<ShopProfile> {
     const snapshot = await getDoc(shopProfileDocRef())
     if (!snapshot.exists()) return DEFAULT_SHOP_PROFILE
-    return snapshot.data() as ShopProfile
+    return { ...DEFAULT_SHOP_PROFILE, ...(snapshot.data() as ShopProfile) }
   },
 
   async saveShopProfile(profile: ShopProfile): Promise<void> {

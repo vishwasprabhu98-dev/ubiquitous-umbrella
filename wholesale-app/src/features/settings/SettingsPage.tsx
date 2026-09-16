@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Users,
   Package,
@@ -49,9 +50,33 @@ type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['value']
 type GeneralOption = (typeof GENERAL_OPTIONS)[number]['value']
 
 export default function SettingsPage() {
-  const [section, setSection] = useState<SettingsSection>('shop')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [section, setSection] = useState<SettingsSection>(() => {
+    const fromUrl = searchParams.get('section')
+    return SETTINGS_SECTIONS.some((s) => s.value === fromUrl)
+      ? (fromUrl as SettingsSection)
+      : 'shop'
+  })
   const [generalOption, setGeneralOption] = useState<GeneralOption>('catalog')
+  const openCustomerCreate = searchParams.get('new') === '1' && section === 'customers'
 
+  useEffect(() => {
+    const fromUrl = searchParams.get('section')
+    if (fromUrl && SETTINGS_SECTIONS.some((s) => s.value === fromUrl)) {
+      setSection(fromUrl as SettingsSection)
+    }
+  }, [searchParams])
+
+  const clearNewParam = () => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('new')
+        return next
+      },
+      { replace: true },
+    )
+  }
   return (
     <div className="space-y-6">
       <div>
@@ -115,7 +140,12 @@ export default function SettingsPage() {
       <div className="mt-2">
         {section === 'shop' && <ShopProfileSettings />}
         {section === 'users' && <UserManagement />}
-        {section === 'customers' && <CustomerManagement />}
+        {section === 'customers' && (
+          <CustomerManagement
+            autoOpenCreate={openCustomerCreate}
+            onAutoOpenCreateHandled={clearNewParam}
+          />
+        )}
         {section === 'products' && <ProductManagement />}
         {section === 'pricing' && <PricingManagement />}
         {section === 'numberformat' && <NumberFormatSettings />}

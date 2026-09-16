@@ -253,6 +253,8 @@ export interface ShopProfile {
   gstNumber: string
   phone: string
   email?: string
+  /** UPI ID shown on payment reminders (e.g. shop@okaxis). */
+  upiId?: string
   compositionGstRate: number
 }
 

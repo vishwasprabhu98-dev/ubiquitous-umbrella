@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf'
+import upiLogoUrl from '@/assets/upi.png'
 
 const UNSUPPORTED_COLOR = /oklch|oklab|lab\(|color\(/i
 
@@ -361,10 +362,39 @@ function fillCenteredTextWithSpacing(
   ctx.textAlign = prevAlign
 }
 
+function roundRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  const radius = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('Failed to load image'))
+    img.src = src
+  })
+}
+
 /** Draw a landscape payment-reminder JPEG without html2canvas (avoids CSS/dialog capture failures). */
 export async function createPaymentReminderImageBlob(options: {
   amount: number
   shopName: string
+  shopPhone?: string
+  upiId?: string
   asOf?: Date
 }): Promise<Blob> {
   const width = 1280
@@ -376,8 +406,17 @@ export async function createPaymentReminderImageBlob(options: {
   if (!ctx) throw new Error('Could not create canvas')
 
   const shop = options.shopName.trim() || 'Shop'
+  const phone = options.shopPhone?.trim() || ''
+  const upi = options.upiId?.trim() || ''
   const amountLabel = formatReminderAmount(options.amount)
   const oweLabel = `You owe ${formatReminderAmount(options.amount).replace('₹ ', '₹')} as on ${formatReminderAsOf(options.asOf ?? new Date())}`
+
+  let upiImg: HTMLImageElement | null = null
+  try {
+    upiImg = await loadImage(upiLogoUrl)
+  } catch {
+    upiImg = null
+  }
 
   // Soft blush → stone → cool gray gradient
   const gradient = ctx.createLinearGradient(0, 0, width, height)
@@ -392,46 +431,92 @@ export async function createPaymentReminderImageBlob(options: {
   ctx.lineWidth = 2
   ctx.strokeRect(24, 24, width - 48, height - 48)
 
-  // Match PaymentReminderCard: 24px title, text-6xl amount, larger owe — scaled for 1280 canvas
   const scale = width / 720
   ctx.fillStyle = '#9ca3af'
   ctx.font = `600 ${Math.round(24 * scale)}px system-ui, -apple-system, sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText('PAYMENT REMINDER', width / 2, 150)
+  ctx.fillText('PAYMENT REMINDER', width / 2, 100)
 
   ctx.fillStyle = '#8B1E1E'
-  ctx.font = `700 ${Math.round(60 * scale)}px system-ui, -apple-system, sans-serif`
-  fillCenteredTextWithSpacing(ctx, amountLabel, width / 2, 300, Math.round(4.8 * scale))
+  ctx.font = `700 ${Math.round(56 * scale)}px system-ui, -apple-system, sans-serif`
+  fillCenteredTextWithSpacing(ctx, amountLabel, width / 2, 200, Math.round(4.8 * scale))
 
   ctx.fillStyle = '#6b7280'
-  ctx.font = `400 ${Math.round(20 * scale)}px system-ui, -apple-system, sans-serif`
+  ctx.font = `400 ${Math.round(16 * scale)}px system-ui, -apple-system, sans-serif`
   ctx.textAlign = 'center'
-  ctx.fillText(oweLabel, width / 2, 410)
+  ctx.fillText(oweLabel, width / 2, 280)
 
-  // Shop button
-  ctx.font = '600 24px system-ui, -apple-system, sans-serif'
-  const padX = 36
+  // Shop badge
+  ctx.font = '600 22px system-ui, -apple-system, sans-serif'
+  const padX = 32
   const btnTextW = ctx.measureText(shop).width
-  const btnW = btnTextW + padX * 2 + 28
-  const btnH = 56
+  const btnW = btnTextW + padX * 2 + 24
+  const btnH = 44
   const btnX = (width - btnW) / 2
-  const btnY = 500
-  const radius = 8
+  const btnY = 320
 
   ctx.fillStyle = '#9ca3af'
-  ctx.beginPath()
-  ctx.moveTo(btnX + radius, btnY)
-  ctx.arcTo(btnX + btnW, btnY, btnX + btnW, btnY + btnH, radius)
-  ctx.arcTo(btnX + btnW, btnY + btnH, btnX, btnY + btnH, radius)
-  ctx.arcTo(btnX, btnY + btnH, btnX, btnY, radius)
-  ctx.arcTo(btnX, btnY, btnX + btnW, btnY, radius)
-  ctx.closePath()
+  roundRectPath(ctx, btnX, btnY, btnW, btnH, 8)
   ctx.fill()
 
   ctx.fillStyle = '#ffffff'
   ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
   ctx.fillText(shop, width / 2, btnY + btnH / 2)
+
+  // UPI image left · phone + UPI ID right — row centered
+  const rowTop = btnY + btnH + 24
+  const gap = 28
+  let drawW = 0
+  let drawH = 0
+  if (upiImg) {
+    const maxW = 170
+    const maxH = 100
+    const ratio = Math.min(maxW / upiImg.naturalWidth, maxH / upiImg.naturalHeight)
+    drawW = upiImg.naturalWidth * ratio
+    drawH = upiImg.naturalHeight * ratio
+  }
+
+  ctx.font = '700 34px system-ui, -apple-system, sans-serif'
+  const phoneW = phone ? ctx.measureText(phone).width : 0
+  ctx.font = '600 22px system-ui, -apple-system, sans-serif'
+  const upiLabel = upi ? `UPI ID: ${upi}` : ''
+  const upiW = upiLabel ? ctx.measureText(upiLabel).width : 0
+  const textColW = Math.max(phoneW, upiW)
+  const textBlockH = (phone ? 34 : 0) + (phone && upi ? 12 : 0) + (upi ? 24 : 0)
+  const rowH = Math.max(drawH, textBlockH)
+  const rowW = drawW + (drawW && textColW ? gap : 0) + textColW
+  const rowX = (width - rowW) / 2
+
+  if (upiImg && drawW > 0) {
+    ctx.drawImage(upiImg, rowX, rowTop + (rowH - drawH) / 2, drawW, drawH)
+  }
+
+  const textX = rowX + drawW + (drawW && textColW ? gap : 0)
+  const textCenterY = rowTop + rowH / 2
+  if (phone && upi) {
+    ctx.fillStyle = '#111827'
+    ctx.font = '700 34px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(phone, textX, textCenterY - 18)
+    ctx.fillStyle = '#374151'
+    ctx.font = '600 22px system-ui, -apple-system, sans-serif'
+    ctx.fillText(upiLabel, textX, textCenterY + 20)
+  } else if (phone) {
+    ctx.fillStyle = '#111827'
+    ctx.font = '700 34px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(phone, textX, textCenterY)
+  } else if (upi) {
+    ctx.fillStyle = '#374151'
+    ctx.font = '600 22px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(upiLabel, textX, textCenterY)
+  }
 
   return canvasToImageBlob(canvas)
 }
@@ -439,6 +524,8 @@ export async function createPaymentReminderImageBlob(options: {
 export async function sharePaymentReminderImage(options: {
   amount: number
   shopName: string
+  shopPhone?: string
+  upiId?: string
   customerName: string
   phone?: string | null
   text?: string
@@ -447,6 +534,8 @@ export async function sharePaymentReminderImage(options: {
   const blob = await createPaymentReminderImageBlob({
     amount: options.amount,
     shopName: options.shopName,
+    shopPhone: options.shopPhone,
+    upiId: options.upiId,
   })
   await shareImageBlob({
     blob,

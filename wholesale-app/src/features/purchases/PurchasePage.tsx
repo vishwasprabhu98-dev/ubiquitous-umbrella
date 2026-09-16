@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 import {
@@ -70,6 +71,7 @@ const STATUS_STYLES: Record<PurchaseStatus, string> = {
 
 export default function PurchasePage() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | PurchaseStatus>('ALL')
   const [formOpen, setFormOpen] = useState(false)
@@ -338,6 +340,20 @@ export default function PurchasePage() {
     setVendorSearch('')
     setFormOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return
+    openCreate()
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('new')
+        return next
+      },
+      { replace: true },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams])
 
   const pdfFilename = (purchase: PurchaseInvoice) =>
     `purchase-${purchase.purchaseNumber ?? purchase.purchaseId}.pdf`

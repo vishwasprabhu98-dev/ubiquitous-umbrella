@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 import {
@@ -251,6 +252,7 @@ function getPresetRange(preset: DatePreset): { from: string; to: string } {
 
 export default function BillingPage() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [viewBill, setViewBill] = useState<Bill | null>(null)
   const [sharingPdf, setSharingPdf] = useState(false)
@@ -411,6 +413,21 @@ export default function BillingPage() {
     })
     setFormOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return
+    openCreate()
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('new')
+        return next
+      },
+      { replace: true },
+    )
+    // Intentionally open once when landing with ?new=1
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams])
 
   const openEdit = useCallback(
     (bill: Bill) => {

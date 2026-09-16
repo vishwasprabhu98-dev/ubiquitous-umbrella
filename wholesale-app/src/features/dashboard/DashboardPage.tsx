@@ -1,7 +1,17 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, ShoppingCart, CreditCard, MessageCircle, Loader2 } from 'lucide-react'
+import {
+  ArrowRight,
+  ShoppingCart,
+  CreditCard,
+  MessageCircle,
+  Loader2,
+  Zap,
+  FileText,
+  Receipt,
+  ClipboardList,
+} from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import { billRepository } from '@/firebase/repositories/billRepository'
@@ -21,9 +31,10 @@ import {
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { addIstDays, todayIst } from '@/lib/istDate'
 import { shareElementAsImage } from '@/lib/sharePdf'
+import { useAuthStore } from '@/stores/authStore'
 import InvoiceView from '@/features/billing/InvoiceView'
 import OrderView from '@/features/orders/OrderView'
-import type { Bill, Order, TimeSlot } from '@/types'
+import type { Bill, Order, TimeSlot, UserRole } from '@/types'
 
 const TIME_SLOT_ORDER: Record<TimeSlot, number> = { MORNING: 0, AFTERNOON: 1, EVENING: 2 }
 const TIME_SLOT_LABEL: Record<TimeSlot, string> = { MORNING: 'Morning', AFTERNOON: 'Afternoon', EVENING: 'Evening' }
@@ -34,6 +45,75 @@ const TIME_SLOT_STYLE: Record<TimeSlot, string> = {
 }
 
 const MAX_PENDING_PAYMENTS = 10
+
+const QUICK_CREATE_ACTIONS: {
+  label: string
+  to: string
+  icon: typeof FileText
+  accent: string
+  roles: UserRole[]
+}[] = [
+  {
+    label: 'Bill',
+    to: '/billing?new=1',
+    icon: FileText,
+    accent: 'text-blue-500',
+    roles: ['staff', 'finance', 'admin'],
+  },
+  {
+    label: 'Purchase',
+    to: '/purchases?new=1',
+    icon: Receipt,
+    accent: 'text-rose-500',
+    roles: ['finance', 'admin'],
+  },
+  {
+    label: 'Order',
+    to: '/orders?new=1',
+    icon: ClipboardList,
+    accent: 'text-emerald-500',
+    roles: ['staff', 'finance', 'admin'],
+  },
+]
+
+function QuickCreate() {
+  const role = useAuthStore((s) => s.user?.role) ?? 'staff'
+  const actions = QUICK_CREATE_ACTIONS.filter((a) => a.roles.includes(role))
+  if (actions.length === 0) return null
+
+  return (
+    <Card className="border-gray-200 bg-white dark:border-[#2a3040] dark:bg-[#141820]">
+      <CardContent className="p-4 sm:p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <Zap className="h-4 w-4 text-amber-500" fill="currentColor" />
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Quick Create</h2>
+        </div>
+        <div
+          className="grid gap-3"
+          style={{ gridTemplateColumns: `repeat(${Math.min(actions.length, 4)}, minmax(0, 1fr))` }}
+        >
+          {actions.map((action) => {
+            const Icon = action.icon
+            return (
+              <Link
+                key={action.to}
+                to={action.to}
+                className="group flex flex-col items-center gap-2 rounded-xl p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 transition-colors group-hover:bg-gray-200 dark:bg-[#1e2430] dark:group-hover:bg-[#262d3c] sm:h-16 sm:w-16">
+                  <Icon className={`h-6 w-6 sm:h-7 sm:w-7 ${action.accent}`} strokeWidth={1.75} />
+                </span>
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-200 sm:text-sm">
+                  {action.label}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 function orderDateKey(order: Order): string {
   return order.orderDate || format(order.createdAt?.toDate?.() ?? new Date(), 'yyyy-MM-dd')
@@ -209,6 +289,8 @@ export default function DashboardPage() {
           Upcoming orders and pending payments at a glance.
         </p>
       </div>
+
+      <QuickCreate />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Card>

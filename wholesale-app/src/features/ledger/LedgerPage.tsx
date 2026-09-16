@@ -350,6 +350,8 @@ function LedgerCard({
   entry,
   monthKey,
   shopName,
+  shopPhone,
+  upiId,
   onRecordPayment,
   onShareLedger,
   onViewRow,
@@ -357,6 +359,8 @@ function LedgerCard({
   entry: CustomerLedgerEntry
   monthKey?: string
   shopName?: string
+  shopPhone?: string
+  upiId?: string
   onRecordPayment: (entry: CustomerLedgerEntry) => void
   onShareLedger: (entry: CustomerLedgerEntry) => void
   onViewRow?: (row: LedgerRow, detailBills: Bill[], detailPurchases: PurchaseInvoice[]) => void
@@ -631,6 +635,8 @@ function LedgerCard({
               <PaymentReminderCard
                 amount={dueAmount}
                 shopName={shopName?.trim() || 'Shop'}
+                shopPhone={shopPhone}
+                upiId={upiId}
               />
             </div>
           </div>
@@ -666,6 +672,8 @@ function LedgerCard({
                   await sharePaymentReminderImage({
                     amount: dueAmount,
                     shopName: business,
+                    shopPhone,
+                    upiId,
                     customerName: entry.name,
                     phone,
                     text,
@@ -1525,6 +1533,8 @@ export default function LedgerPage() {
                 entry={entry}
                 monthKey={view === 'existing' ? monthKey : undefined}
                 shopName={shopProfile?.name}
+                shopPhone={shopProfile?.phone}
+                upiId={shopProfile?.upiId}
                 onRecordPayment={setPayEntry}
                 onShareLedger={(e) => { setShareFrom(''); setShareTo(''); setShareLedgerEntry(e) }}
                 onViewRow={handleViewLedgerRow}

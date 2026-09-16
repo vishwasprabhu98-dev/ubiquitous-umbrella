@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 import {
@@ -184,6 +185,7 @@ function billStatusFromPayment(paymentStatus: PaymentStatus): 'PENDING' | 'PARTI
 
 export default function OrdersPage() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [editOrder, setEditOrder] = useState<Order | null>(null)
@@ -363,6 +365,19 @@ export default function OrdersPage() {
       items: [{ productId: '', productName: '', quantity: 1, unitRate: 0, total: 0 }],
     })
   }
+
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return
+    setCreateOpen(true)
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('new')
+        return next
+      },
+      { replace: true },
+    )
+  }, [searchParams, setSearchParams])
 
   const openEdit = (order: Order) => {
     setDetailOrder(null)

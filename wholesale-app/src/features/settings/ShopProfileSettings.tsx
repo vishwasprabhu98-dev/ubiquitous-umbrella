@@ -116,6 +116,20 @@ export default function ShopProfileSettings() {
               <Input {...register('email')} type="email" placeholder="shop@example.com" />
             </div>
 
+            <div className="md:col-span-2 space-y-1.5">
+              <Label>UPI ID</Label>
+              <Input
+                {...register('upiId')}
+                placeholder="e.g. shopname@okaxis"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <p className="text-xs text-gray-400">
+                Shown on payment reminders with PhonePe / Google Pay.
+              </p>
+            </div>
+
             <div className="space-y-1.5">
               <Label>Composition GST Rate (%)</Label>
               <Input
