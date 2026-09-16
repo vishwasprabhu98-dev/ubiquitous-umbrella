@@ -2,7 +2,7 @@ import { Outlet } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import Sidebar from './Sidebar'
-import Navbar from './Navbar'
+import BottomNav from './BottomNav'
 
 export default function AppLayout() {
   const { sidebarCollapsed } = useUIStore()
@@ -12,16 +12,16 @@ export default function AppLayout() {
       <Sidebar />
       <div
         className={cn(
-          'flex flex-col flex-1 overflow-hidden transition-all duration-300',
-          sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'
+          'flex flex-1 flex-col overflow-hidden transition-all duration-300',
+          sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64',
         )}
       >
-        <Navbar />
         <main className="flex-1 overflow-y-auto">
-          <div className="container mx-auto p-4 lg:p-6 max-w-7xl">
+          <div className="container mx-auto max-w-7xl p-4 pb-28 lg:p-6 lg:pb-6">
             <Outlet />
           </div>
         </main>
+        <BottomNav />
       </div>
     </div>
   )

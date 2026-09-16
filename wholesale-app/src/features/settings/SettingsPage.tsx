@@ -1,25 +1,6 @@
-import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import {
-  Users,
-  Package,
-  Tags,
-  Hash,
-  Store,
-  ShieldCheck,
-  RefreshCw,
-  Images,
-  ScrollText,
-  SlidersHorizontal,
-} from 'lucide-react'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Label } from '@/components/ui/label'
+import { useState, useEffect, useMemo } from 'react'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 import CustomerManagement from './CustomerManagement'
 import ProductManagement from './ProductManagement'
 import CatalogProductManagement from './CatalogProductManagement'
@@ -29,43 +10,53 @@ import ShopProfileSettings from './ShopProfileSettings'
 import LedgerMaintenanceSettings from './LedgerMaintenanceSettings'
 import UserManagement from './UserManagement'
 import ActivityLogsSettings from './ActivityLogsSettings'
-
-const SETTINGS_SECTIONS = [
-  { value: 'shop', label: 'Shop Profile', icon: Store },
-  { value: 'users', label: 'Users', icon: ShieldCheck },
-  { value: 'customers', label: 'Customers', icon: Users },
-  { value: 'products', label: 'Products', icon: Package },
-  { value: 'pricing', label: 'Custom Pricing', icon: Tags },
-  { value: 'numberformat', label: 'Number Format', icon: Hash },
-  { value: 'general', label: 'General', icon: SlidersHorizontal },
-] as const
-
-const GENERAL_OPTIONS = [
-  { value: 'catalog', label: 'Catalog Products', icon: Images },
-  { value: 'ledger', label: 'Ledger', icon: RefreshCw },
-  { value: 'activity', label: 'Activity Logs', icon: ScrollText },
-] as const
-
-type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['value']
-type GeneralOption = (typeof GENERAL_OPTIONS)[number]['value']
+import {
+  settingsSectionsForRole,
+  generalOptionsForRole,
+  canAccessSettingsSection,
+  SETTINGS_SECTIONS,
+  GENERAL_OPTIONS,
+  type SettingsSectionKey,
+  type GeneralOptionKey,
+} from '@/lib/roleAccess'
+import { useAuthStore } from '@/stores/authStore'
+import type { UserRole } from '@/types'
 
 export default function SettingsPage() {
+  const role = (useAuthStore((s) => s.user?.role) ?? 'staff') as UserRole
   const [searchParams, setSearchParams] = useSearchParams()
-  const [section, setSection] = useState<SettingsSection>(() => {
-    const fromUrl = searchParams.get('section')
-    return SETTINGS_SECTIONS.some((s) => s.value === fromUrl)
-      ? (fromUrl as SettingsSection)
-      : 'shop'
+  const availableSections = useMemo(() => settingsSectionsForRole(role), [role])
+  const availableGeneral = useMemo(() => generalOptionsForRole(role), [role])
+
+  const sectionFromUrl = searchParams.get('section') as SettingsSectionKey | null
+  const optionFromUrl = searchParams.get('option') as GeneralOptionKey | null
+
+  const [section, setSection] = useState<SettingsSectionKey | null>(() => {
+    if (sectionFromUrl && canAccessSettingsSection(role, sectionFromUrl)) return sectionFromUrl
+    return null
   })
-  const [generalOption, setGeneralOption] = useState<GeneralOption>('catalog')
+
+  const [generalOption, setGeneralOption] = useState<GeneralOptionKey>(() => {
+    if (optionFromUrl && availableGeneral.some((o) => o.value === optionFromUrl)) {
+      return optionFromUrl
+    }
+    return availableGeneral[0]?.value ?? 'catalog'
+  })
+
   const openCustomerCreate = searchParams.get('new') === '1' && section === 'customers'
 
   useEffect(() => {
-    const fromUrl = searchParams.get('section')
-    if (fromUrl && SETTINGS_SECTIONS.some((s) => s.value === fromUrl)) {
-      setSection(fromUrl as SettingsSection)
+    const fromUrl = searchParams.get('section') as SettingsSectionKey | null
+    if (fromUrl && canAccessSettingsSection(role, fromUrl)) {
+      setSection(fromUrl)
+    } else {
+      setSection(null)
     }
-  }, [searchParams])
+    const opt = searchParams.get('option') as GeneralOptionKey | null
+    if (opt && availableGeneral.some((o) => o.value === opt)) {
+      setGeneralOption(opt)
+    }
+  }, [searchParams, role, availableGeneral])
 
   const clearNewParam = () => {
     setSearchParams(
@@ -77,67 +68,34 @@ export default function SettingsPage() {
       { replace: true },
     )
   }
+
+  if (availableSections.length === 0) {
+    return <Navigate to="/more" replace />
+  }
+
+  if (!section) {
+    return <Navigate to="/more" replace />
+  }
+
+  const sectionMeta = SETTINGS_SECTIONS.find((s) => s.value === section)
+  const generalMeta = GENERAL_OPTIONS.find((o) => o.value === generalOption)
+  const title =
+    section === 'general' ? (generalMeta?.label ?? 'General') : (sectionMeta?.label ?? 'Settings')
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <Link
+          to="/more"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 dark:border-[#2a3040] dark:text-gray-300 dark:hover:bg-[#252d3d]"
+          aria-label="Back to More"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Link>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h1>
+      </div>
+
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
-        <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-          Manage shop profile, users, customers, products, pricing, and general options
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-        <div className="space-y-2">
-          <Label htmlFor="settings-section">Settings section</Label>
-          <Select value={section} onValueChange={(v) => setSection(v as SettingsSection)}>
-            <SelectTrigger id="settings-section" className="h-11">
-              <SelectValue placeholder="Select section" />
-            </SelectTrigger>
-            <SelectContent>
-              {SETTINGS_SECTIONS.map((item) => {
-                const Icon = item.icon
-                return (
-                  <SelectItem key={item.value} value={item.value}>
-                    <span className="flex items-center gap-2">
-                      <Icon className="h-4 w-4 shrink-0 text-gray-500" />
-                      {item.label}
-                    </span>
-                  </SelectItem>
-                )
-              })}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {section === 'general' && (
-          <div className="space-y-2">
-            <Label htmlFor="general-option">General</Label>
-            <Select
-              value={generalOption}
-              onValueChange={(v) => setGeneralOption(v as GeneralOption)}
-            >
-              <SelectTrigger id="general-option" className="h-11">
-                <SelectValue placeholder="Select option" />
-              </SelectTrigger>
-              <SelectContent>
-                {GENERAL_OPTIONS.map((item) => {
-                  const Icon = item.icon
-                  return (
-                    <SelectItem key={item.value} value={item.value}>
-                      <span className="flex items-center gap-2">
-                        <Icon className="h-4 w-4 shrink-0 text-gray-500" />
-                        {item.label}
-                      </span>
-                    </SelectItem>
-                  )
-                })}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      </div>
-
-      <div className="mt-2">
         {section === 'shop' && <ShopProfileSettings />}
         {section === 'users' && <UserManagement />}
         {section === 'customers' && (

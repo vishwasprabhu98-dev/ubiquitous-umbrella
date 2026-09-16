@@ -1417,8 +1417,7 @@ export default function OrdersPage() {
               </div>
             </div>
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeCreate}>Cancel</Button>
+            <DialogFooter className="sm:flex-col sm:items-stretch">
               <Button
                 type="submit"
                 disabled={isSubmitting || createMutation.isPending || updateMutation.isPending}
@@ -1428,6 +1427,13 @@ export default function OrdersPage() {
                 )}
                 {editOrder ? 'Save Changes' : 'Create Order'}
               </Button>
+              <button
+                type="button"
+                onClick={closeCreate}
+                className="h-10 w-full text-sm font-medium text-gray-500 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 sm:h-auto sm:w-auto sm:self-center"
+              >
+                Cancel
+              </button>
             </DialogFooter>
           </form>
         </DialogContent>

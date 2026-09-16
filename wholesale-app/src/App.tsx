@@ -16,6 +16,7 @@ import BalanceSheetPage from '@/features/balance-sheet/BalanceSheetPage'
 import SettingsPage from '@/features/settings/SettingsPage'
 import LedgerPage from '@/features/ledger/LedgerPage'
 import PurchasePage from '@/features/purchases/PurchasePage'
+import MorePage from '@/features/more/MorePage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -67,19 +68,16 @@ export default function App() {
             <Route path="orders" element={<OrdersPage />} />
             <Route path="ledger" element={<LedgerPage />} />
             <Route path="ledger/new" element={<LedgerPage />} />
-            <Route
-              path="purchases"
-              element={
-                <ProtectedRoute allowedRoles={['finance', 'admin']}>
-                  <PurchasePage />
-                </ProtectedRoute>
-              }
-            />
+            <Route path="purchases" element={<PurchasePage />} />
             <Route path="balance-sheet" element={<BalanceSheetPage />} />
+            <Route
+              path="more"
+              element={<MorePage />}
+            />
             <Route
               path="settings"
               element={
-                <ProtectedRoute allowedRoles={['admin']}>
+                <ProtectedRoute allowedRoles={['finance', 'admin']}>
                   <SettingsPage />
                 </ProtectedRoute>
               }
