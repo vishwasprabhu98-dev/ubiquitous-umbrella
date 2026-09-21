@@ -80,6 +80,17 @@ export interface CatalogProductSize {
   discountedPrice: number
 }
 
+/** Filter pill on the public catalog (managed in Settings → Catalog Products). */
+export interface CatalogFilter {
+  id: string
+  label: string
+  sortOrder?: number
+}
+
+export interface CatalogFiltersSettings {
+  filters: CatalogFilter[]
+}
+
 /** Storefront catalog item (separate from billing inventory products). */
 export interface CatalogProduct {
   catalogProductId: string
@@ -96,6 +107,8 @@ export interface CatalogProduct {
   imageUrls: string[]
   /** Optional badge on the card, e.g. "Top item". */
   badge?: string
+  /** Catalog filter IDs this product belongs to (multi-select). */
+  filterIds?: string[]
   sortOrder?: number
   createdAt: Timestamp
 }

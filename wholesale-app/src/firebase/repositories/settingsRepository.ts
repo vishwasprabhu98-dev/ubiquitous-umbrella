@@ -1,10 +1,17 @@
 import { doc, getDoc, setDoc, runTransaction } from 'firebase/firestore'
 import { db } from '@/firebase/config'
 import { COLLECTIONS } from '@/firebase/collections'
-import type { NumberFormatSettings, NumberFormatConfig, ShopProfile } from '@/types'
+import type {
+  CatalogFilter,
+  CatalogFiltersSettings,
+  NumberFormatSettings,
+  NumberFormatConfig,
+  ShopProfile,
+} from '@/types'
 
 const SETTINGS_DOC_ID = 'numberFormat'
 const SHOP_PROFILE_DOC_ID = 'shopProfile'
+const CATALOG_FILTERS_DOC_ID = 'catalogFilters'
 
 export const DEFAULT_SHOP_PROFILE: ShopProfile = {
   name: '',
@@ -20,6 +27,35 @@ export const DEFAULT_SHOP_PROFILE: ShopProfile = {
 }
 
 const shopProfileDocRef = () => doc(db, COLLECTIONS.SETTINGS, SHOP_PROFILE_DOC_ID)
+const catalogFiltersDocRef = () => doc(db, COLLECTIONS.SETTINGS, CATALOG_FILTERS_DOC_ID)
+
+export const DEFAULT_CATALOG_FILTERS: CatalogFiltersSettings = {
+  filters: [],
+}
+
+function normalizeCatalogFilters(
+  raw: Partial<CatalogFiltersSettings> | undefined
+): CatalogFiltersSettings {
+  const filters = (raw?.filters ?? [])
+    .map((f, index): CatalogFilter | null => {
+      if (!f || typeof f !== 'object') return null
+      const id = typeof f.id === 'string' ? f.id.trim() : ''
+      const label = typeof f.label === 'string' ? f.label.trim() : ''
+      if (!id || !label) return null
+      return {
+        id,
+        label,
+        sortOrder:
+          typeof f.sortOrder === 'number' && Number.isFinite(f.sortOrder)
+            ? f.sortOrder
+            : index,
+      }
+    })
+    .filter((f): f is CatalogFilter => f != null)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+
+  return { filters }
+}
 
 export const DEFAULT_NUMBER_FORMAT: NumberFormatSettings = {
   bill: {
@@ -115,6 +151,16 @@ export const settingsRepository = {
 
   async saveShopProfile(profile: ShopProfile): Promise<void> {
     await setDoc(shopProfileDocRef(), profile)
+  },
+
+  async getCatalogFilters(): Promise<CatalogFiltersSettings> {
+    const snapshot = await getDoc(catalogFiltersDocRef())
+    if (!snapshot.exists()) return DEFAULT_CATALOG_FILTERS
+    return normalizeCatalogFilters(snapshot.data() as Partial<CatalogFiltersSettings>)
+  },
+
+  async saveCatalogFilters(settings: CatalogFiltersSettings): Promise<void> {
+    await setDoc(catalogFiltersDocRef(), normalizeCatalogFilters(settings))
   },
 
   async generateAndIncrementOrderNumber(): Promise<string> {

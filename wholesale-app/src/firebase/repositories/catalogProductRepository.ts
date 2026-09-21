@@ -38,12 +38,21 @@ function normalizeFormData(data: CatalogProductFormData | Partial<CatalogProduct
     discountedPrice = sizes[0].discountedPrice
   }
 
+  const filterIds = Array.from(
+    new Set(
+      (data.filterIds ?? [])
+        .map((id) => (typeof id === 'string' ? id.trim() : ''))
+        .filter(Boolean)
+    )
+  )
+
   return sanitizeFirestoreData({
     ...data,
     name: data.name?.trim(),
     description: data.description?.trim(),
     unit,
     badge: data.badge?.trim() || undefined,
+    filterIds,
     imageUrls,
     sizes,
     originalPrice,

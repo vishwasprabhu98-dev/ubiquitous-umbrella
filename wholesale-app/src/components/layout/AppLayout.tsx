@@ -17,7 +17,7 @@ export default function AppLayout() {
         )}
       >
         <main className="flex-1 overflow-y-auto">
-          <div className="container mx-auto max-w-7xl p-4 pb-28 lg:p-6 lg:pb-6">
+          <div className="container mx-auto max-w-7xl p-4 pb-36 lg:p-6 lg:pb-6">
             <Outlet />
           </div>
         </main>

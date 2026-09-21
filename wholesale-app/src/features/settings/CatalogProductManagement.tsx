@@ -12,12 +12,15 @@ import {
   Images,
   ExternalLink,
   X,
+  Filter,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { catalogProductRepository } from '@/firebase/repositories/catalogProductRepository'
+import { settingsRepository } from '@/firebase/repositories/settingsRepository'
 import { getFirestoreErrorMessage } from '@/lib/firestoreUtils'
 import { toDisplayImageUrl } from '@/lib/driveImageUrl'
 import { logActivity } from '@/firebase/repositories/activityLogRepository'
+import { cn, formatCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,8 +33,11 @@ import {
 } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatCurrency } from '@/lib/utils'
-import type { CatalogProduct, CatalogProductFormData } from '@/types'
+import type {
+  CatalogFilter,
+  CatalogProduct,
+  CatalogProductFormData,
+} from '@/types'
 
 const UNIT_OPTIONS = ['KG', 'Litre', 'Piece', 'Box', 'Bag', 'Bundle', 'Dozen', 'Meter', 'Set']
 
@@ -50,6 +56,7 @@ const catalogSchema = z
     discountedPrice: z.number().min(0, 'Enter a valid price'),
     badge: z.string().optional(),
     sortOrder: z.number().optional(),
+    filterIds: z.array(z.string()),
     imageUrls: z
       .array(z.object({ url: z.string() }))
       .min(1, 'Add at least one image URL'),
@@ -85,6 +92,13 @@ const catalogSchema = z
 
 type FormData = z.infer<typeof catalogSchema>
 
+function newFilterId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
 function toFormValues(product?: CatalogProduct | null): FormData {
   if (!product) {
     return {
@@ -95,6 +109,7 @@ function toFormValues(product?: CatalogProduct | null): FormData {
       discountedPrice: 0,
       badge: '',
       sortOrder: undefined,
+      filterIds: [],
       imageUrls: [{ url: '' }],
       sizes: [],
     }
@@ -107,6 +122,7 @@ function toFormValues(product?: CatalogProduct | null): FormData {
     discountedPrice: product.discountedPrice,
     badge: product.badge ?? '',
     sortOrder: product.sortOrder,
+    filterIds: product.filterIds ?? [],
     imageUrls:
       product.imageUrls.length > 0
         ? product.imageUrls.map((url) => ({ url }))
@@ -136,6 +152,7 @@ function toPayload(data: FormData): CatalogProductFormData {
     discountedPrice: sizes.length > 0 ? sizes[0].discountedPrice : data.discountedPrice,
     badge: data.badge?.trim() || undefined,
     sortOrder: data.sortOrder,
+    filterIds: data.filterIds,
     imageUrls: data.imageUrls.map((row) => row.url.trim()).filter(Boolean),
     sizes,
   }
@@ -165,11 +182,18 @@ export default function CatalogProductManagement() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<CatalogProduct | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [newFilterLabel, setNewFilterLabel] = useState('')
 
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['catalogProducts'],
     queryFn: () => catalogProductRepository.getAll(),
   })
+
+  const { data: catalogFiltersSettings, isLoading: filtersLoading } = useQuery({
+    queryKey: ['catalogFilters'],
+    queryFn: () => settingsRepository.getCatalogFilters(),
+  })
+  const catalogFilters = catalogFiltersSettings?.filters ?? []
 
   const {
     register,
@@ -177,6 +201,7 @@ export default function CatalogProductManagement() {
     reset,
     control,
     watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(catalogSchema),
@@ -197,6 +222,7 @@ export default function CatalogProductManagement() {
 
   const watchedUrls = watch('imageUrls')
   const watchedSizes = watch('sizes')
+  const watchedFilterIds = watch('filterIds') ?? []
   const hasFilledSizes = (watchedSizes ?? []).some((s) => s.label?.trim())
 
   const createMutation = useMutation({
@@ -260,6 +286,49 @@ export default function CatalogProductManagement() {
     onError: (error) => toast.error(getFirestoreErrorMessage(error)),
   })
 
+  const saveFiltersMutation = useMutation({
+    mutationFn: (filters: CatalogFilter[]) =>
+      settingsRepository.saveCatalogFilters({ filters }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalogFilters'] })
+      toast.success('Catalog filters saved')
+    },
+    onError: (error) => toast.error(getFirestoreErrorMessage(error)),
+  })
+
+  const addFilter = () => {
+    const label = newFilterLabel.trim()
+    if (!label) {
+      toast.error('Enter a filter name')
+      return
+    }
+    if (catalogFilters.some((f) => f.label.toLowerCase() === label.toLowerCase())) {
+      toast.error('A filter with this name already exists')
+      return
+    }
+    const next: CatalogFilter[] = [
+      ...catalogFilters,
+      { id: newFilterId(), label, sortOrder: catalogFilters.length },
+    ]
+    setNewFilterLabel('')
+    saveFiltersMutation.mutate(next)
+  }
+
+  const removeFilter = (filterId: string) => {
+    const next = catalogFilters
+      .filter((f) => f.id !== filterId)
+      .map((f, index) => ({ ...f, sortOrder: index }))
+    saveFiltersMutation.mutate(next)
+  }
+
+  const toggleFilterId = (filterId: string, checked: boolean) => {
+    const current = watchedFilterIds
+    const next = checked
+      ? Array.from(new Set([...current, filterId]))
+      : current.filter((id) => id !== filterId)
+    setValue('filterIds', next, { shouldDirty: true })
+  }
+
   const openCreate = () => {
     setEditing(null)
     reset(toFormValues())
@@ -287,6 +356,8 @@ export default function CatalogProductManagement() {
     }
   }
 
+  const filterLabelById = new Map(catalogFilters.map((f) => [f.id, f.label]))
+
   const filtered = products.filter(
     (p) =>
       p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -295,6 +366,80 @@ export default function CatalogProductManagement() {
 
   return (
     <div className="space-y-4">
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <Filter className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                Catalog filters
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                These become pill buttons on the public catalog. Assign one or more to each
+                product when creating or editing.
+              </p>
+            </div>
+          </div>
+
+          {filtersLoading ? (
+            <Skeleton className="h-9 w-full rounded-lg" />
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {catalogFilters.length === 0 ? (
+                  <p className="text-xs text-gray-400">No filters yet — add one below.</p>
+                ) : (
+                  catalogFilters.map((filter) => (
+                    <span
+                      key={filter.id}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
+                    >
+                      {filter.label}
+                      <button
+                        type="button"
+                        aria-label={`Remove ${filter.label}`}
+                        disabled={saveFiltersMutation.isPending}
+                        onClick={() => removeFilter(filter.id)}
+                        className="rounded-full p-0.5 hover:bg-indigo-100 dark:hover:bg-indigo-900/60"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input
+                  placeholder="e.g. Snacks, Spices, Top sellers…"
+                  value={newFilterLabel}
+                  onChange={(e) => setNewFilterLabel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      addFilter()
+                    }
+                  }}
+                  className="sm:max-w-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={saveFiltersMutation.isPending}
+                  onClick={addFilter}
+                >
+                  {saveFiltersMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  Add filter
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -347,6 +492,9 @@ export default function CatalogProductManagement() {
             const price = displayPrice(product)
             const hasDiscount = price.discounted < price.original
             const sizeCount = product.sizes?.filter((s) => s.label.trim()).length ?? 0
+            const productFilterLabels = (product.filterIds ?? [])
+              .map((id) => filterLabelById.get(id))
+              .filter(Boolean)
             return (
               <Card key={product.catalogProductId} className="overflow-hidden">
                 <div className="relative aspect-[3/4] w-full overflow-hidden bg-gray-100 dark:bg-[#1e2330]">
@@ -393,6 +541,18 @@ export default function CatalogProductManagement() {
                       </Button>
                     </div>
                   </div>
+                  {productFilterLabels.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {productFilterLabels.map((label) => (
+                        <span
+                          key={label}
+                          className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-[#1e2330] dark:text-gray-300"
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-baseline gap-2 text-sm">
                     <span className="font-semibold text-gray-900 dark:text-white">
                       {price.suffix}
@@ -464,6 +624,46 @@ export default function CatalogProductManagement() {
               </select>
               {errors.unit && (
                 <p className="text-xs text-red-500">{errors.unit.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <Label>Catalog filters</Label>
+                <p className="text-[11px] text-gray-400">
+                  Select all filters this product should appear under. A product can belong to
+                  multiple filters.
+                </p>
+              </div>
+              {catalogFilters.length === 0 ? (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  No filters yet. Add filters above on this page first.
+                </p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {catalogFilters.map((filter) => {
+                    const checked = watchedFilterIds.includes(filter.id)
+                    return (
+                      <label
+                        key={filter.id}
+                        className={cn(
+                          'flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
+                          checked
+                            ? 'border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200'
+                            : 'border-gray-200 dark:border-[#2a3040] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#2a3348]/40'
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          checked={checked}
+                          onChange={(e) => toggleFilterId(filter.id, e.target.checked)}
+                        />
+                        <span className="font-medium">{filter.label}</span>
+                      </label>
+                    )
+                  })}
+                </div>
               )}
             </div>
 

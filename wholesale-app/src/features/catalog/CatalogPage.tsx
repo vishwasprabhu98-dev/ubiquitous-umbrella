@@ -1,16 +1,27 @@
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Images, Loader2, MapPin, Phone, Mail, FileText } from 'lucide-react'
 import { catalogProductRepository } from '@/firebase/repositories/catalogProductRepository'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
+import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import CatalogProductCard from './CatalogProductCard'
 
 export default function CatalogPage() {
+  const [activeFilterId, setActiveFilterId] = useState<string | 'all'>('all')
+
   const { data: shopProfile } = useQuery({
     queryKey: ['shopProfile', 'public'],
     queryFn: () => settingsRepository.getShopProfile(),
     staleTime: 5 * 60_000,
   })
+
+  const { data: catalogFiltersSettings } = useQuery({
+    queryKey: ['catalogFilters', 'public'],
+    queryFn: () => settingsRepository.getCatalogFilters(),
+    staleTime: 5 * 60_000,
+  })
+  const catalogFilters = catalogFiltersSettings?.filters ?? []
 
   const {
     data: products = [],
@@ -23,6 +34,11 @@ export default function CatalogPage() {
     queryFn: () => catalogProductRepository.getAll(),
     staleTime: 60_000,
   })
+
+  const filteredProducts = useMemo(() => {
+    if (activeFilterId === 'all') return products
+    return products.filter((p) => (p.filterIds ?? []).includes(activeFilterId))
+  }, [products, activeFilterId])
 
   const shopName = shopProfile?.name?.trim() || 'Shop'
   const addressParts = [
@@ -38,6 +54,8 @@ export default function CatalogPage() {
     Boolean(shopProfile?.phone?.trim()) ||
     Boolean(shopProfile?.email?.trim()) ||
     Boolean(shopProfile?.gstNumber?.trim())
+
+  const showFilterPills = catalogFilters.length > 0
 
   return (
     <div className="flex min-h-screen flex-col bg-[#f5f6f8]">
@@ -55,6 +73,40 @@ export default function CatalogPage() {
             <Images className="h-5 w-5" />
           </div>
         </div>
+
+        {showFilterPills && (
+          <div className="mx-auto max-w-7xl overflow-x-auto px-4 pb-3 sm:px-6">
+            <div className="flex w-max items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveFilterId('all')}
+                className={cn(
+                  'rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors',
+                  activeFilterId === 'all'
+                    ? 'border-indigo-600 bg-indigo-600 text-white'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                )}
+              >
+                All
+              </button>
+              {catalogFilters.map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setActiveFilterId(filter.id)}
+                  className={cn(
+                    'rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap',
+                    activeFilterId === filter.id
+                      ? 'border-indigo-600 bg-indigo-600 text-white'
+                      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                  )}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-10">
@@ -92,9 +144,21 @@ export default function CatalogPage() {
             <Images className="mx-auto mb-3 h-10 w-10 text-gray-300" />
             <p className="text-gray-500">No products in the catalog yet.</p>
           </div>
+        ) : filteredProducts.length === 0 ? (
+          <div className="rounded-3xl bg-white px-6 py-20 text-center shadow-sm">
+            <Images className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+            <p className="text-gray-500">No products in this filter.</p>
+            <button
+              type="button"
+              onClick={() => setActiveFilterId('all')}
+              className="mt-4 text-sm font-medium text-indigo-600 hover:underline"
+            >
+              Show all products
+            </button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 gap-5 min-[640px]:grid-cols-2 min-[1281px]:grid-cols-3">
-            {products.map((product) => (
+            {filteredProducts.map((product) => (
               <CatalogProductCard
                 key={product.catalogProductId}
                 product={product}

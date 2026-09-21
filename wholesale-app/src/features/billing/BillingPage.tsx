@@ -172,21 +172,6 @@ function BillCard({
           className="flex items-center justify-end gap-1.5 flex-wrap pt-1 border-t border-gray-100 dark:border-[#2a3040]"
           onClick={(e) => e.stopPropagation()}
         >
-          {!isPaid && (
-            <Button variant="outline" size="sm" className="h-9 text-xs gap-1 sm:h-7" onClick={() => onEdit(bill)}>
-              <Edit2 className="h-3.5 w-3.5 sm:h-3 sm:w-3" /> Edit
-            </Button>
-          )}
-          {!bill.movedToLedger && bill.remainingAmount > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 text-xs gap-1 sm:h-7 border-green-200 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-400 dark:hover:bg-green-950"
-              onClick={() => onPayment(bill)}
-            >
-              <CreditCard className="h-3.5 w-3.5 sm:h-3 sm:w-3" /> Pay
-            </Button>
-          )}
           {/* Move to Ledger — only for existing (registered) customers with outstanding amount */}
           {bill.customerId && !bill.movedToLedger && bill.remainingAmount > 0 && (
             <Button
@@ -202,6 +187,21 @@ function BillCard({
                 <BookOpen className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
               )}
               Move to Ledger
+            </Button>
+          )}
+          {!bill.movedToLedger && bill.remainingAmount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-xs gap-1 sm:h-7 border-green-200 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-400 dark:hover:bg-green-950"
+              onClick={() => onPayment(bill)}
+            >
+              <CreditCard className="h-3.5 w-3.5 sm:h-3 sm:w-3" /> Pay
+            </Button>
+          )}
+          {!isPaid && (
+            <Button variant="outline" size="sm" className="h-9 text-xs gap-1 sm:h-7" onClick={() => onEdit(bill)}>
+              <Edit2 className="h-3.5 w-3.5 sm:h-3 sm:w-3" /> Edit
             </Button>
           )}
           {bill.movedToLedger && (
@@ -863,10 +863,6 @@ export default function BillingPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Billing</h1>
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Create and manage invoices</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" />
-          New Bill
-        </Button>
       </div>
 
       {/* Search + Filter bar */}
@@ -1826,6 +1822,15 @@ export default function BillingPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      <button
+        type="button"
+        onClick={openCreate}
+        aria-label="New bill"
+        className="fixed z-50 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 active:scale-95 bottom-[calc(7.25rem+env(safe-area-inset-bottom))] right-4 lg:bottom-10 lg:right-8"
+      >
+        <Plus className="h-7 w-7" strokeWidth={2.5} />
+      </button>
     </div>
   )
 }

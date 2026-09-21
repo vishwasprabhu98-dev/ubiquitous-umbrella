@@ -793,10 +793,6 @@ export default function OrdersPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Orders</h1>
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Manage quotations and estimates</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          New Order
-        </Button>
       </div>
 
       {/* Search + Filter bar */}
@@ -1717,6 +1713,15 @@ export default function OrdersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <button
+        type="button"
+        onClick={() => setCreateOpen(true)}
+        aria-label="New order"
+        className="fixed z-50 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 active:scale-95 bottom-[calc(7.25rem+env(safe-area-inset-bottom))] right-4 lg:bottom-10 lg:right-8"
+      >
+        <Plus className="h-7 w-7" strokeWidth={2.5} />
+      </button>
     </div>
   )
 }
