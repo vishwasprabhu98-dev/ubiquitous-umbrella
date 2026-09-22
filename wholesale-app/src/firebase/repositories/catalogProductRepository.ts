@@ -46,6 +46,11 @@ function normalizeFormData(data: CatalogProductFormData | Partial<CatalogProduct
     )
   )
 
+  const sortOrder =
+    typeof data.sortOrder === 'number' && Number.isFinite(data.sortOrder)
+      ? data.sortOrder
+      : undefined
+
   return sanitizeFirestoreData({
     ...data,
     name: data.name?.trim(),
@@ -53,6 +58,7 @@ function normalizeFormData(data: CatalogProductFormData | Partial<CatalogProduct
     unit,
     badge: data.badge?.trim() || undefined,
     filterIds,
+    sortOrder,
     imageUrls,
     sizes,
     originalPrice,
@@ -71,7 +77,9 @@ export const catalogProductRepository = {
       const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER
       const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER
       if (ao !== bo) return ao - bo
-      return 0
+      const at = a.createdAt?.toMillis?.() ?? 0
+      const bt = b.createdAt?.toMillis?.() ?? 0
+      return bt - at
     })
   },
 
@@ -97,6 +105,12 @@ export const catalogProductRepository = {
       doc(db, COLLECTIONS.CATALOG_PRODUCTS, catalogProductId),
       normalizeFormData(data)
     )
+  },
+
+  async setSortOrder(catalogProductId: string, sortOrder: number): Promise<void> {
+    await updateDoc(doc(db, COLLECTIONS.CATALOG_PRODUCTS, catalogProductId), {
+      sortOrder,
+    })
   },
 
   async delete(catalogProductId: string): Promise<void> {

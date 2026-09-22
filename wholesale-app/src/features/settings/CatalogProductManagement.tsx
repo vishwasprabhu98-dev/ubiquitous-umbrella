@@ -13,6 +13,8 @@ import {
   ExternalLink,
   X,
   Filter,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { catalogProductRepository } from '@/firebase/repositories/catalogProductRepository'
@@ -296,6 +298,39 @@ export default function CatalogProductManagement() {
     onError: (error) => toast.error(getFirestoreErrorMessage(error)),
   })
 
+  const reorderMutation = useMutation({
+    mutationFn: async ({
+      productId,
+      direction,
+    }: {
+      productId: string
+      direction: 'up' | 'down'
+    }) => {
+      const ordered = [...products]
+      const index = ordered.findIndex((p) => p.catalogProductId === productId)
+      if (index < 0) return
+      const swapWith = direction === 'up' ? index - 1 : index + 1
+      if (swapWith < 0 || swapWith >= ordered.length) return
+
+      ;[ordered[index], ordered[swapWith]] = [ordered[swapWith], ordered[index]]
+
+      await Promise.all(
+        ordered.map((p, i) =>
+          catalogProductRepository.setSortOrder(p.catalogProductId, i + 1)
+        )
+      )
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalogProducts'] })
+    },
+    onError: (error) => toast.error(getFirestoreErrorMessage(error)),
+  })
+
+  const moveProduct = (productId: string, direction: 'up' | 'down') => {
+    if (reorderMutation.isPending) return
+    reorderMutation.mutate({ productId, direction })
+  }
+
   const addFilter = () => {
     const label = newFilterLabel.trim()
     if (!label) {
@@ -466,7 +501,8 @@ export default function CatalogProductManagement() {
 
       <p className="text-xs text-gray-500">
         Public page at <span className="font-medium">/catalog</span> — no login required.
-        Paste Google Drive share links for images.
+        Paste Google Drive share links for images. Use sort order (or the ↑↓ buttons) so lower
+        numbers appear first.
       </p>
 
       {isLoading ? (
@@ -487,7 +523,7 @@ export default function CatalogProductManagement() {
         </Card>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((product) => {
+          {filtered.map((product, index) => {
             const thumb = toDisplayImageUrl(product.imageUrls[0] ?? '', 400)
             const price = displayPrice(product)
             const hasDiscount = price.discounted < price.original
@@ -495,6 +531,8 @@ export default function CatalogProductManagement() {
             const productFilterLabels = (product.filterIds ?? [])
               .map((id) => filterLabelById.get(id))
               .filter(Boolean)
+            const canMoveUp = !search.trim() && index > 0
+            const canMoveDown = !search.trim() && index < filtered.length - 1
             return (
               <Card key={product.catalogProductId} className="overflow-hidden">
                 <div className="relative aspect-[3/4] w-full overflow-hidden bg-gray-100 dark:bg-[#1e2330]">
@@ -511,6 +549,9 @@ export default function CatalogProductManagement() {
                       <Images className="h-8 w-8" />
                     </div>
                   )}
+                  <span className="absolute left-2 top-2 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-semibold text-white">
+                    #{product.sortOrder ?? '—'}
+                  </span>
                 </div>
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-start justify-between gap-2">
@@ -522,7 +563,27 @@ export default function CatalogProductManagement() {
                         {product.description}
                       </p>
                     </div>
-                    <div className="flex shrink-0 gap-1">
+                    <div className="flex shrink-0 gap-0.5">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={!canMoveUp || reorderMutation.isPending}
+                        title="Move up"
+                        onClick={() => moveProduct(product.catalogProductId, 'up')}
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={!canMoveDown || reorderMutation.isPending}
+                        title="Move down"
+                        onClick={() => moveProduct(product.catalogProductId, 'down')}
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -793,7 +854,7 @@ export default function CatalogProductManagement() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="cat-sort">Sort order (optional)</Label>
+                <Label htmlFor="cat-sort">Sort order</Label>
                 <Input
                   id="cat-sort"
                   type="number"
@@ -805,6 +866,9 @@ export default function CatalogProductManagement() {
                         : Number(v),
                   })}
                 />
+                <p className="text-[11px] text-gray-400">
+                  Lower numbers show first on /catalog. Leave blank to keep at the end.
+                </p>
               </div>
             </div>
 

@@ -17,6 +17,7 @@ import {
   Images,
   RefreshCw,
   ScrollText,
+  Link2,
 } from 'lucide-react'
 
 /** Routes each role may access (path prefixes). */
@@ -102,12 +103,15 @@ export function canAccessSettingsSection(role: UserRole, section: SettingsSectio
 }
 
 /** Modules shown on the More page, grouped like Zoho. */
+export type MoreModuleAction = 'copyCatalogLink'
+
 export const MORE_MODULE_GROUPS: {
   title?: string
   roles: UserRole[]
   items: {
     label: string
-    to: string
+    to?: string
+    action?: MoreModuleAction
     icon: LucideIcon
     roles: UserRole[]
   }[]
@@ -146,6 +150,12 @@ export const MORE_MODULE_GROUPS: {
         label: 'Catalog Products',
         to: '/settings?section=general&option=catalog',
         icon: Images,
+        roles: ['admin'],
+      },
+      {
+        label: 'Copy Catalog Link',
+        action: 'copyCatalogLink',
+        icon: Link2,
         roles: ['admin'],
       },
       {

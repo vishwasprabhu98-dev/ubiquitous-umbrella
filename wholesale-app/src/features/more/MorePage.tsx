@@ -1,11 +1,47 @@
 import { Link } from 'react-router-dom'
 import { ChevronRight, LogOut, Moon, Sun, User } from 'lucide-react'
-import { moreGroupsForRole, ROLE_LABELS } from '@/lib/roleAccess'
+import { toast } from 'sonner'
+import { moreGroupsForRole, ROLE_LABELS, type MoreModuleAction } from '@/lib/roleAccess'
 import { useAuth } from '@/hooks/useAuth'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
 import type { UserRole } from '@/types'
+
+function catalogPublicUrl(): string {
+  return `${window.location.origin}/catalog`
+}
+
+async function copyCatalogLink() {
+  const url = catalogPublicUrl()
+  try {
+    await navigator.clipboard.writeText(url)
+    toast.success('Catalog link copied')
+  } catch {
+    // Fallback for older browsers / insecure contexts
+    const input = document.createElement('input')
+    input.value = url
+    input.setAttribute('readonly', '')
+    input.style.position = 'fixed'
+    input.style.opacity = '0'
+    document.body.appendChild(input)
+    input.select()
+    try {
+      document.execCommand('copy')
+      toast.success('Catalog link copied')
+    } catch {
+      toast.error('Could not copy link')
+    } finally {
+      document.body.removeChild(input)
+    }
+  }
+}
+
+async function runMoreAction(action: MoreModuleAction) {
+  if (action === 'copyCatalogLink') {
+    await copyCatalogLink()
+  }
+}
 
 export default function MorePage() {
   const role = (useAuthStore((s) => s.user?.role) ?? 'staff') as UserRole
@@ -25,7 +61,7 @@ export default function MorePage() {
       {groups.length > 0 && (
         <div className="space-y-5">
           {groups.map((group) => (
-            <section key={group.title ?? group.items[0]?.to} className="space-y-2">
+            <section key={group.title ?? group.items[0]?.to ?? group.items[0]?.label} className="space-y-2">
               {group.title && (
                 <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
                   {group.title}
@@ -34,23 +70,40 @@ export default function MorePage() {
               <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-[#2a3040] dark:bg-[#1e2330]">
                 {group.items.map((item, index) => {
                   const Icon = item.icon
+                  const key = item.to ?? item.action ?? item.label
                   return (
-                    <div key={item.to}>
+                    <div key={key}>
                       {index > 0 && (
                         <div className="mx-4 border-t border-gray-100 dark:border-[#2a3040]" />
                       )}
-                      <Link
-                        to={item.to}
-                        className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-gray-50 dark:hover:bg-[#252d3d]"
-                      >
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-700 dark:bg-[#2a3348] dark:text-gray-200">
-                          <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
-                        </span>
-                        <span className="flex-1 text-sm font-medium text-gray-900 dark:text-white">
-                          {item.label}
-                        </span>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
-                      </Link>
+                      {item.action ? (
+                        <button
+                          type="button"
+                          onClick={() => void runMoreAction(item.action!)}
+                          className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-[#252d3d]"
+                        >
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-700 dark:bg-[#2a3348] dark:text-gray-200">
+                            <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
+                          </span>
+                          <span className="flex-1 text-sm font-medium text-gray-900 dark:text-white">
+                            {item.label}
+                          </span>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
+                        </button>
+                      ) : (
+                        <Link
+                          to={item.to!}
+                          className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-gray-50 dark:hover:bg-[#252d3d]"
+                        >
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-700 dark:bg-[#2a3348] dark:text-gray-200">
+                            <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
+                          </span>
+                          <span className="flex-1 text-sm font-medium text-gray-900 dark:text-white">
+                            {item.label}
+                          </span>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
+                        </Link>
+                      )}
                     </div>
                   )
                 })}
