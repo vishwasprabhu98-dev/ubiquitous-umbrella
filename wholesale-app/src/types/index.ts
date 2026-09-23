@@ -80,7 +80,7 @@ export interface CatalogProductSize {
   discountedPrice: number
 }
 
-/** Filter pill on the public catalog (managed in Settings → Catalog Products). */
+/** Catalog filter (managed in Settings → Catalog Products). */
 export interface CatalogFilter {
   id: string
   label: string
@@ -89,6 +89,8 @@ export interface CatalogFilter {
 
 export interface CatalogFiltersSettings {
   filters: CatalogFilter[]
+  /** Filter shown as selected by default on the public catalog. Empty = show all. */
+  defaultFilterId?: string | null
 }
 
 /** Storefront catalog item (separate from billing inventory products). */

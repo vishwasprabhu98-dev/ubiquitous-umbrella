@@ -289,8 +289,17 @@ export default function CatalogProductManagement() {
   })
 
   const saveFiltersMutation = useMutation({
-    mutationFn: (filters: CatalogFilter[]) =>
-      settingsRepository.saveCatalogFilters({ filters }),
+    mutationFn: (settings: {
+      filters: CatalogFilter[]
+      defaultFilterId?: string | null
+    }) =>
+      settingsRepository.saveCatalogFilters({
+        filters: settings.filters,
+        defaultFilterId:
+          settings.defaultFilterId !== undefined
+            ? settings.defaultFilterId
+            : catalogFiltersSettings?.defaultFilterId ?? null,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['catalogFilters'] })
       toast.success('Catalog filters saved')
@@ -346,14 +355,25 @@ export default function CatalogProductManagement() {
       { id: newFilterId(), label, sortOrder: catalogFilters.length },
     ]
     setNewFilterLabel('')
-    saveFiltersMutation.mutate(next)
+    saveFiltersMutation.mutate({ filters: next })
   }
 
   const removeFilter = (filterId: string) => {
     const next = catalogFilters
       .filter((f) => f.id !== filterId)
       .map((f, index) => ({ ...f, sortOrder: index }))
-    saveFiltersMutation.mutate(next)
+    const defaultFilterId =
+      catalogFiltersSettings?.defaultFilterId === filterId
+        ? null
+        : catalogFiltersSettings?.defaultFilterId ?? null
+    saveFiltersMutation.mutate({ filters: next, defaultFilterId })
+  }
+
+  const setDefaultFilter = (filterId: string) => {
+    saveFiltersMutation.mutate({
+      filters: catalogFilters,
+      defaultFilterId: filterId || null,
+    })
   }
 
   const toggleFilterId = (filterId: string, checked: boolean) => {
@@ -410,7 +430,7 @@ export default function CatalogProductManagement() {
                 Catalog filters
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                These become pill buttons on the public catalog. Assign one or more to each
+                These appear as checkboxes on the public catalog. Assign one or more to each
                 product when creating or editing.
               </p>
             </div>
@@ -470,6 +490,30 @@ export default function CatalogProductManagement() {
                   Add filter
                 </Button>
               </div>
+
+              {catalogFilters.length > 0 && (
+                <div className="space-y-1.5 border-t border-gray-100 pt-3 dark:border-[#2a3040]">
+                  <Label htmlFor="default-catalog-filter">Default filter on catalog</Label>
+                  <p className="text-[11px] text-gray-400">
+                    Pre-selected when visitors open /catalog. Choose “Show all” to start with
+                    every product visible.
+                  </p>
+                  <select
+                    id="default-catalog-filter"
+                    className="flex h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={catalogFiltersSettings?.defaultFilterId ?? ''}
+                    disabled={saveFiltersMutation.isPending}
+                    onChange={(e) => setDefaultFilter(e.target.value)}
+                  >
+                    <option value="">Show all products</option>
+                    {catalogFilters.map((filter) => (
+                      <option key={filter.id} value={filter.id}>
+                        {filter.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </>
           )}
         </CardContent>

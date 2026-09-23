@@ -31,6 +31,7 @@ const catalogFiltersDocRef = () => doc(db, COLLECTIONS.SETTINGS, CATALOG_FILTERS
 
 export const DEFAULT_CATALOG_FILTERS: CatalogFiltersSettings = {
   filters: [],
+  defaultFilterId: null,
 }
 
 function normalizeCatalogFilters(
@@ -54,7 +55,12 @@ function normalizeCatalogFilters(
     .filter((f): f is CatalogFilter => f != null)
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
 
-  return { filters }
+  const rawDefault =
+    typeof raw?.defaultFilterId === 'string' ? raw.defaultFilterId.trim() : ''
+  const defaultFilterId =
+    rawDefault && filters.some((f) => f.id === rawDefault) ? rawDefault : null
+
+  return { filters, defaultFilterId }
 }
 
 export const DEFAULT_NUMBER_FORMAT: NumberFormatSettings = {

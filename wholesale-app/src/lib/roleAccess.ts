@@ -142,10 +142,9 @@ export const MORE_MODULE_GROUPS: {
     ],
   },
   {
-    title: 'Setup',
-    roles: ['admin'],
+    title: 'Catalog',
+    roles: ['staff', 'finance', 'admin'],
     items: [
-      { label: 'Number Format', to: '/settings?section=numberformat', icon: Hash, roles: ['admin'] },
       {
         label: 'Catalog Products',
         to: '/settings?section=general&option=catalog',
@@ -156,8 +155,15 @@ export const MORE_MODULE_GROUPS: {
         label: 'Copy Catalog Link',
         action: 'copyCatalogLink',
         icon: Link2,
-        roles: ['admin'],
+        roles: ['staff', 'finance', 'admin'],
       },
+    ],
+  },
+  {
+    title: 'Setup',
+    roles: ['admin'],
+    items: [
+      { label: 'Number Format', to: '/settings?section=numberformat', icon: Hash, roles: ['admin'] },
       {
         label: 'Ledger Maintenance',
         to: '/settings?section=general&option=ledger',

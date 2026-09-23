@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Images, Loader2, MapPin, Phone, Mail, FileText } from 'lucide-react'
 import { catalogProductRepository } from '@/firebase/repositories/catalogProductRepository'
@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import CatalogProductCard from './CatalogProductCard'
 
 export default function CatalogPage() {
-  const [activeFilterId, setActiveFilterId] = useState<string | 'all'>('all')
+  const [selectedFilterIds, setSelectedFilterIds] = useState<string[] | null>(null)
 
   const { data: shopProfile } = useQuery({
     queryKey: ['shopProfile', 'public'],
@@ -22,6 +22,21 @@ export default function CatalogPage() {
     staleTime: 5 * 60_000,
   })
   const catalogFilters = catalogFiltersSettings?.filters ?? []
+  const defaultFilterId = catalogFiltersSettings?.defaultFilterId ?? null
+
+  useEffect(() => {
+    if (selectedFilterIds != null || !catalogFiltersSettings) return
+    if (
+      defaultFilterId &&
+      catalogFilters.some((f) => f.id === defaultFilterId)
+    ) {
+      setSelectedFilterIds([defaultFilterId])
+    } else {
+      setSelectedFilterIds([])
+    }
+  }, [catalogFiltersSettings, catalogFilters, defaultFilterId, selectedFilterIds])
+
+  const activeFilterIds = selectedFilterIds ?? []
 
   const {
     data: products = [],
@@ -36,9 +51,22 @@ export default function CatalogPage() {
   })
 
   const filteredProducts = useMemo(() => {
-    if (activeFilterId === 'all') return products
-    return products.filter((p) => (p.filterIds ?? []).includes(activeFilterId))
-  }, [products, activeFilterId])
+    if (activeFilterIds.length === 0) return products
+    const selected = new Set(activeFilterIds)
+    return products.filter((p) =>
+      (p.filterIds ?? []).some((id) => selected.has(id))
+    )
+  }, [products, activeFilterIds])
+
+  const toggleFilter = (filterId: string) => {
+    setSelectedFilterIds((prev) => {
+      const current = prev ?? []
+      if (current.includes(filterId)) return current.filter((id) => id !== filterId)
+      return [...current, filterId]
+    })
+  }
+
+  const clearFilters = () => setSelectedFilterIds([])
 
   const shopName = shopProfile?.name?.trim() || 'Shop'
   const addressParts = [
@@ -55,7 +83,7 @@ export default function CatalogPage() {
     Boolean(shopProfile?.email?.trim()) ||
     Boolean(shopProfile?.gstNumber?.trim())
 
-  const showFilterPills = catalogFilters.length > 0
+  const showFilters = catalogFilters.length > 0
 
   return (
     <div className="flex min-h-screen flex-col bg-[#f5f6f8]">
@@ -73,43 +101,33 @@ export default function CatalogPage() {
             <Images className="h-5 w-5" />
           </div>
         </div>
+      </header>
 
-        {showFilterPills && (
-          <div className="mx-auto max-w-7xl overflow-x-auto px-4 pb-3 sm:px-6">
-            <div className="flex w-max items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveFilterId('all')}
-                className={cn(
-                  'rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors',
-                  activeFilterId === 'all'
-                    ? 'border-indigo-600 bg-indigo-600 text-white'
-                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                )}
-              >
-                All
-              </button>
-              {catalogFilters.map((filter) => (
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-10">
+        {showFilters && (
+          <div className="mb-6 flex flex-wrap gap-2">
+            {catalogFilters.map((filter) => {
+              const active = activeFilterIds.includes(filter.id)
+              return (
                 <button
                   key={filter.id}
                   type="button"
-                  onClick={() => setActiveFilterId(filter.id)}
+                  aria-pressed={active}
+                  onClick={() => toggleFilter(filter.id)}
                   className={cn(
-                    'rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap',
-                    activeFilterId === filter.id
-                      ? 'border-indigo-600 bg-indigo-600 text-white'
-                      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    'rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors',
+                    active
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-white text-gray-700 ring-1 ring-inset ring-gray-200 hover:bg-gray-50'
                   )}
                 >
                   {filter.label}
                 </button>
-              ))}
-            </div>
+              )
+            })}
           </div>
         )}
-      </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-10">
         {isLoading ? (
           <div className="grid grid-cols-1 gap-5 min-[640px]:grid-cols-2 min-[1281px]:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -147,13 +165,13 @@ export default function CatalogPage() {
         ) : filteredProducts.length === 0 ? (
           <div className="rounded-3xl bg-white px-6 py-20 text-center shadow-sm">
             <Images className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-            <p className="text-gray-500">No products in this filter.</p>
+            <p className="text-gray-500">No products match the selected filters.</p>
             <button
               type="button"
-              onClick={() => setActiveFilterId('all')}
+              onClick={clearFilters}
               className="mt-4 text-sm font-medium text-indigo-600 hover:underline"
             >
-              Show all products
+              Clear filters
             </button>
           </div>
         ) : (

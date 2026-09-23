@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { format, startOfDay, parseISO, isValid } from 'date-fns'
+import { format } from 'date-fns'
 import {
   Users,
   UserPlus,
@@ -24,9 +24,9 @@ import {
   X,
   Share2,
   ShoppingBag,
-  Download,
   MessageCircle,
   Bell,
+  Printer,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn, formatCurrency } from '@/lib/utils'
@@ -51,8 +51,9 @@ import {
   customerBalanceRepository,
   LEDGER_PAYMENT_REF,
 } from '@/firebase/repositories/customerBalanceRepository'
-import { sharePdfBlob, downloadPdfBlob, shareElementAsImage, sharePaymentReminderImage } from '@/lib/sharePdf'
+import { sharePdfBlob, shareElementAsImage, sharePaymentReminderImage } from '@/lib/sharePdf'
 import { createLedgerPdfBlob, type LedgerPdfRow } from '@/lib/ledgerPdf'
+import { printLedgerToBlePrinter } from '@/lib/thermalPrinter'
 import PaymentReminderCard from './PaymentReminderCard'
 import {
   buildExistingLedgerFromBalances,
@@ -60,6 +61,7 @@ import {
   buildVendorLedger,
   matchesLedgerSearch,
   applyMonthActivityToExistingEntries,
+  filterLedgerRowsForPeriod,
   type CustomerLedgerEntry,
   type LedgerRow,
 } from '@/lib/ledgerBuild'
@@ -1094,20 +1096,51 @@ export default function LedgerPage() {
 
   const shareRows = useMemo(() => {
     if (!shareLedgerEntry) return []
-    return shareLedgerEntry.ledgerRows.filter((row) => {
-      if (!row.date) return true
-      const rowDay = startOfDay(row.date)
-      if (shareFrom) {
-        const from = parseISO(shareFrom)
-        if (isValid(from) && rowDay < startOfDay(from)) return false
-      }
-      if (shareTo) {
-        const to = parseISO(shareTo)
-        if (isValid(to) && rowDay > startOfDay(to)) return false
-      }
-      return true
-    })
+    const from = shareFrom ? istDayStart(shareFrom) : undefined
+    const to = shareTo ? istDayEnd(shareTo) : undefined
+    return filterLedgerRowsForPeriod(shareLedgerEntry.ledgerRows, from ?? undefined, to ?? undefined)
   }, [shareLedgerEntry, shareFrom, shareTo])
+
+  /** Balance carried into the selected period (Brought Forward amount). */
+  const ledgerPrintBroughtForward = useMemo(() => {
+    const chronological = [...shareRows].reverse()
+    const bfRow = chronological.find((r) => r.type === 'opening')
+    if (!bfRow) return 0
+    return bfRow.debit - bfRow.credit
+  }, [shareRows])
+
+  const ledgerPrintBills = useMemo(() => {
+    if (!shareLedgerEntry) return []
+    const billIds = new Set(
+      shareRows.filter((r) => r.type === 'bill').map((r) => r.reference)
+    )
+    return [...shareLedgerEntry.bills]
+      .filter((b) => billIds.has(b.billId))
+      .sort((a, b) => {
+        const da = a.billingDate || ''
+        const db = b.billingDate || ''
+        if (da !== db) return da.localeCompare(db)
+        return (a.billNumber || '').localeCompare(b.billNumber || '')
+      })
+  }, [shareLedgerEntry, shareRows])
+
+  const ledgerPrintPayments = useMemo(() => {
+    return [...shareRows]
+      .filter((r) => r.type === 'payment')
+      .reverse()
+      .map((r) => ({
+        date: r.date,
+        amount: r.credit > 0 ? r.credit : r.debit,
+        paymentMode: r.paymentMode,
+        description: r.description,
+      }))
+  }, [shareRows])
+
+  const ledgerPrintBalanceDue = useMemo(() => {
+    if (shareRows.length === 0) return ledgerPrintBroughtForward
+    // shareRows are newest-first; first row holds closing balance for the period
+    return shareRows[0]?.balance ?? ledgerPrintBroughtForward
+  }, [shareRows, ledgerPrintBroughtForward])
 
   const enrichRowsForPdf = (rows: LedgerRow[]): LedgerPdfRow[] =>
     rows.map((row) => {
@@ -1639,7 +1672,7 @@ export default function LedgerPage() {
               </div>
             </div>
           )}
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 flex-wrap">
             <Button
               variant="outline"
               onClick={() => { setShareLedgerEntry(null); setShareFrom(''); setShareTo('') }}
@@ -1653,28 +1686,41 @@ export default function LedgerPage() {
                 if (!shareLedgerEntry) return
                 setIsSharing(true)
                 try {
-                  const blob = await createLedgerPdfBlob(
-                    shareLedgerEntry,
-                    enrichRowsForPdf(shareRows),
+                  await printLedgerToBlePrinter({
                     shopProfile,
-                    shareFrom,
-                    shareTo
-                  )
-                  await downloadPdfBlob({
-                    blob,
-                    filename: `ledger-${shareLedgerEntry.name.replace(/\s+/g, '-')}.pdf`,
-                    onFallback: (msg) => toast.info(msg),
+                    customerName: shareLedgerEntry.name,
+                    customerPhone: shareLedgerEntry.phone,
+                    dateFrom: shareFrom || undefined,
+                    dateTo: shareTo || undefined,
+                    openingBalance: ledgerPrintBroughtForward,
+                    bills: ledgerPrintBills,
+                    payments: ledgerPrintPayments,
+                    balanceDue: ledgerPrintBalanceDue,
                   })
-                } catch {
-                  toast.error('Failed to download ledger')
+                  logActivity({
+                    type: 'bill.printed',
+                    description: `Printed 58mm ledger for ${shareLedgerEntry.name} (${ledgerPrintBills.length} bills, ${ledgerPrintPayments.length} payments)`,
+                    entityType: 'ledger',
+                    entityId: shareLedgerEntry.customerId || shareLedgerEntry.key,
+                    entityLabel: shareLedgerEntry.name,
+                    customerId: shareLedgerEntry.customerId,
+                    customerName: shareLedgerEntry.name,
+                  })
+                  toast.success('Ledger sent to 58mm printer')
+                } catch (err) {
+                  if (err instanceof Error && err.name === 'NotFoundError') {
+                    toast.info('Printer selection was cancelled')
+                  } else {
+                    toast.error(err instanceof Error ? err.message : 'Failed to print ledger')
+                  }
                 } finally {
                   setIsSharing(false)
                 }
               }}
-              disabled={isSharing || shareRows.length === 0}
+              disabled={isSharing}
             >
-              {isSharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              Download PDF
+              {isSharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              Print 58mm
             </Button>
             <Button
               onClick={async () => {
