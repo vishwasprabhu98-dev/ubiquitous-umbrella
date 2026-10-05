@@ -20,6 +20,8 @@ import {
   Share2,
   MessageCircle,
   Printer,
+  UserPlus,
+  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { todayIst, addIstDays, istMonthRange, getBillDateString, istDayStart } from '@/lib/istDate'
@@ -285,6 +287,7 @@ export default function BillingPage() {
   const [payMode, setPayMode] = useState<PaymentMode>('CASH')
   const [payRemarks, setPayRemarks] = useState('')
   const [payLoading, setPayLoading] = useState(false)
+  const [moveToLedgerBill, setMoveToLedgerBill] = useState<Bill | null>(null)
 
   const applyPreset = (preset: DatePreset) => {
     setDatePreset(preset)
@@ -694,6 +697,7 @@ export default function BillingPage() {
         meta: { remainingCleared: bill.remainingAmount },
       })
       toast.success('Bill moved to customer ledger')
+      setMoveToLedgerBill(null)
     },
     onError: () => toast.error('Failed to move bill to ledger'),
   })
@@ -830,6 +834,10 @@ export default function BillingPage() {
       return true
     })
       .sort((a, b) => {
+        // New-customer bills (no registered customerId) first
+        const aNew = !a.customerId
+        const bNew = !b.customerId
+        if (aNew !== bNew) return aNew ? -1 : 1
         const da = getBillDateString(a) ?? ''
         const db = getBillDateString(b) ?? ''
         if (da !== db) return db.localeCompare(da)
@@ -1075,23 +1083,51 @@ export default function BillingPage() {
             </p>
           )}
           <div className="grid gap-3">
-            {paginatedBills.map((bill) => {
+            {paginatedBills.map((bill, index) => {
+              const isNewCustomer = !bill.customerId
+              const prev = index > 0 ? paginatedBills[index - 1] : null
+              const showNewHeader = isNewCustomer && (!prev || !!prev.customerId)
+              const showExistingHeader = !isNewCustomer && (!prev || !prev.customerId)
               const movingThis =
                 (moveToLedgerMutation.isPending &&
                   moveToLedgerMutation.variables?.billId === bill.billId) ||
                 (removeFromLedgerMutation.isPending &&
                   removeFromLedgerMutation.variables?.billId === bill.billId)
               return (
-              <BillCard
-                key={bill.billId}
-                bill={bill}
-                onView={setViewBill}
-                onEdit={openEdit}
-                onPayment={openPaymentDialog}
-                onMoveToLedger={(b) => moveToLedgerMutation.mutate(b)}
-                onRemoveFromLedger={(b) => removeFromLedgerMutation.mutate(b)}
-                ledgerActionPending={movingThis}
-              />
+                <div key={bill.billId} className="space-y-3">
+                  {showNewHeader && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <UserPlus className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                        New customers
+                      </p>
+                      <div className="h-px flex-1 bg-amber-200/80 dark:bg-amber-900/50" />
+                    </div>
+                  )}
+                  {showExistingHeader && (
+                    <div className="space-y-3">
+                      {index > 0 && (
+                        <div className="border-t border-dashed border-gray-200 dark:border-[#2a3040] pt-1" />
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Users className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-400">
+                          Existing customers
+                        </p>
+                        <div className="h-px flex-1 bg-blue-200/80 dark:bg-blue-900/50" />
+                      </div>
+                    </div>
+                  )}
+                  <BillCard
+                    bill={bill}
+                    onView={setViewBill}
+                    onEdit={openEdit}
+                    onPayment={openPaymentDialog}
+                    onMoveToLedger={setMoveToLedgerBill}
+                    onRemoveFromLedger={(b) => removeFromLedgerMutation.mutate(b)}
+                    ledgerActionPending={movingThis}
+                  />
+                </div>
               )
             })}
           </div>
@@ -1582,6 +1618,77 @@ export default function BillingPage() {
             </DialogFooter>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Move to Ledger confirmation ── */}
+      <Dialog
+        open={!!moveToLedgerBill}
+        onOpenChange={(open) => {
+          if (!open && !moveToLedgerMutation.isPending) setMoveToLedgerBill(null)
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Move to Ledger?</DialogTitle>
+          </DialogHeader>
+          {moveToLedgerBill && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                Move bill{' '}
+                <span className="font-mono font-semibold text-blue-600">
+                  {moveToLedgerBill.billNumber}
+                </span>{' '}
+                for{' '}
+                <span className="font-semibold">{moveToLedgerBill.customerInfo?.name}</span> to
+                the customer ledger?
+              </p>
+              <div className="rounded-lg bg-gray-50 dark:bg-[#252d3d] border border-gray-200 dark:border-[#2a3040] p-3 space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Grand Total</span>
+                  <span className="font-semibold">{formatCurrency(moveToLedgerBill.grandTotal)}</span>
+                </div>
+                {moveToLedgerBill.amountPaid > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Amount Paid</span>
+                    <span className="text-green-600 font-semibold">
+                      {formatCurrency(moveToLedgerBill.amountPaid)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t pt-1.5">
+                  <span className="font-semibold text-gray-700 dark:text-gray-200">Due on ledger</span>
+                  <span className="text-red-500 font-bold">
+                    {formatCurrency(moveToLedgerBill.remainingAmount)}
+                  </span>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Bill-level due will be cleared. The outstanding amount will be tracked on the
+                customer ledger.
+              </p>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  disabled={moveToLedgerMutation.isPending}
+                  onClick={() => setMoveToLedgerBill(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  disabled={moveToLedgerMutation.isPending}
+                  onClick={() => moveToLedgerMutation.mutate(moveToLedgerBill)}
+                >
+                  {moveToLedgerMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <BookOpen className="h-4 w-4" />
+                  )}
+                  Move to Ledger
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
