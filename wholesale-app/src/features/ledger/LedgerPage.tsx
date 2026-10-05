@@ -1893,8 +1893,8 @@ export default function LedgerPage() {
                           ? 0
                           : viewBill.remainingAmount
                     const shareText = [
-                      `Bill Amount: ${formatCurrency(viewBill.grandTotal)}`,
-                      `Balance Due: ${formatCurrency(balanceDue)}`,
+                      `Bill Amount: *${formatCurrency(viewBill.grandTotal)}*`,
+                      `Balance Due: *${formatCurrency(balanceDue)}*`,
                     ].join('\n')
                     await shareElementAsImage({
                       elementId: 'invoice-print',

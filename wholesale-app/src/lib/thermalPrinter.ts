@@ -1,5 +1,6 @@
 import { formatDate } from '@/lib/utils'
 import { getBillDateString, istDayStart } from '@/lib/istDate'
+import { getInvoiceBalanceBreakdown } from '@/lib/invoiceBalance'
 import type { Bill, ShopProfile } from '@/types'
 
 const RECEIPT_WIDTH = 32
@@ -144,7 +145,11 @@ function billDateLabel(bill: Bill): string {
   return '-'
 }
 
-export function buildThermalReceiptText(bill: Bill, shopProfile?: ShopProfile | null): string {
+export function buildThermalReceiptText(
+  bill: Bill,
+  shopProfile?: ShopProfile | null,
+  ledgerOutstanding?: number | null
+): string {
   const lines: string[] = []
   const address = [shopProfile?.address, shopProfile?.city, shopProfile?.state, shopProfile?.pincode]
     .filter(Boolean)
@@ -155,21 +160,25 @@ export function buildThermalReceiptText(bill: Bill, shopProfile?: ShopProfile | 
   if (shopProfile?.phone) lines.push(center(`Ph: ${shopProfile.phone}`))
   if (shopProfile?.gstNumber) lines.push(center(`GST: ${shopProfile.gstNumber}`))
   lines.push(divider('='))
-  lines.push(...buildThermalBillBodyLines(bill))
+  lines.push(...buildThermalBillBodyLines(bill, true, ledgerOutstanding))
   lines.push(divider('='))
   lines.push(center(`Thank you _/\\_`))
 
   return `${lines.join('\n')}\n`
 }
 
-function buildThermalBillBodyLines(bill: Bill, showCustomer = true): string[] {
+function buildThermalBillBodyLines(
+  bill: Bill,
+  showCustomer = true,
+  ledgerOutstanding?: number | null
+): string[] {
   const lines: string[] = []
   lines.push(pair('Bill No: ', bill.billNumber))
   lines.push(pair('Date: ', billDateLabel(bill)))
   lines.push(divider())
   if (showCustomer) {
     lines.push(...wrapLine(`Customer: ${bill.customerInfo.name}`))
-    lines.push(...wrapLine(`Phone: ${bill.customerInfo.phone}`))
+    if (bill.customerInfo.phone) lines.push(...wrapLine(`Phone: ${bill.customerInfo.phone}`))
     if (bill.customerInfo.gstNumber) lines.push(...wrapLine(`GST: ${bill.customerInfo.gstNumber}`))
     lines.push(divider())
   }
@@ -190,11 +199,33 @@ function buildThermalBillBodyLines(bill: Bill, showCustomer = true): string[] {
   if ((bill.discount ?? 0) > 0) lines.push(pair('Bill Discount: ', `- ${money(bill.discount)}`))
   if (bill.isGstBill && (bill.gstAmount ?? 0) > 0) lines.push(pair('GST: ', money(bill.gstAmount)))
   lines.push(pair('Grand Total: ', money(bill.grandTotal)))
-  if (bill.amountPaid > 0 && showCustomer) {
-    lines.push(pair('Paid: ', money(bill.amountPaid)))
-    if ((bill.remainingAmount ?? 0) > 0) {
+
+  if (showCustomer) {
+    const {
+      previousBalance,
+      dueAmount,
+      showPreviousBalance,
+      showAmountPaid,
+      showBalanceDue,
+      showCredit,
+    } = getInvoiceBalanceBreakdown(bill, ledgerOutstanding)
+
+    if (showPreviousBalance) {
+      lines.push(
+        pair(
+          previousBalance < 0 ? 'Prev Credit: ' : 'Prev Balance: ',
+          money(Math.abs(previousBalance))
+        )
+      )
+    }
+    if (showAmountPaid) lines.push(pair('Paid: ', money(bill.amountPaid)))
+    if (showBalanceDue) {
       lines.push(divider('-'))
-      lines.push(pair('Balance Due: ', money(bill.remainingAmount)))
+      lines.push(pair('Balance Due: ', money(dueAmount)))
+    }
+    if (showCredit) {
+      lines.push(divider('-'))
+      lines.push(pair('Credit Balance: ', money(Math.abs(dueAmount))))
     }
   }
   return lines
@@ -250,6 +281,7 @@ export function buildLedgerThermalStatement(params: {
   const address = [shopProfile?.address, shopProfile?.city, shopProfile?.state, shopProfile?.pincode]
     .filter(Boolean)
     .join(', ')
+  if (shopProfile?.gstNumber) lines.push(center(`GST: ${shopProfile.gstNumber}`))
 
   lines.push(center(shopProfile?.name || 'LEDGER'))
   if (address) lines.push(...wrapLine(address))
@@ -259,7 +291,6 @@ export function buildLedgerThermalStatement(params: {
   lines.push(divider())
   lines.push(...wrapLine(`Customer: ${customerName}`))
   lines.push(...wrapLine(`Phone: ${customerPhone || '—'}`))
-  if (shopProfile?.gstNumber) lines.push(center(`GST: ${shopProfile.gstNumber}`))
   
   const period =
     dateFrom && dateTo
@@ -446,8 +477,12 @@ async function requestBlePrinterDevice(bleNavigator: BleNavigator): Promise<BleD
   })
 }
 
-export async function printBillToBlePrinter(bill: Bill, shopProfile?: ShopProfile | null) {
-  await printThermalTextToBlePrinter(buildThermalReceiptText(bill, shopProfile))
+export async function printBillToBlePrinter(
+  bill: Bill,
+  shopProfile?: ShopProfile | null,
+  ledgerOutstanding?: number | null
+) {
+  await printThermalTextToBlePrinter(buildThermalReceiptText(bill, shopProfile, ledgerOutstanding))
 }
 
 export async function printLedgerToBlePrinter(

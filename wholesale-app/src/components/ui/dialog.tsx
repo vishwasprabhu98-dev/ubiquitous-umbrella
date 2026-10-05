@@ -23,6 +23,25 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
+/** Shared classes for large scrollable forms (bill / order) on iPhone Safari. */
+export const mobileFormDialogClassName = cn(
+  'flex flex-col gap-0 overflow-hidden p-0',
+  // Mobile: bottom sheet — avoid top/translate centering (breaks scroll + keyboard on iOS)
+  'max-sm:fixed max-sm:inset-x-0 max-sm:left-0 max-sm:top-auto max-sm:bottom-0',
+  'max-sm:h-[min(94dvh,100%)] max-sm:max-h-[min(94dvh,100%)] max-sm:w-full max-sm:max-w-none',
+  'max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl',
+  'max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[env(safe-area-inset-bottom)]',
+  'max-sm:transition-[bottom,max-height] max-sm:duration-200 max-sm:ease-out',
+  // Desktop: keep room to scroll inside
+  'sm:max-h-[min(95dvh,900px)]'
+)
+
+export const mobileFormDialogBodyClassName =
+  'min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] px-4 py-4 sm:px-6 space-y-6'
+
+export const mobileFormDialogFooterClassName =
+  'shrink-0 border-t border-border bg-background px-4 py-3 sm:px-6'
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
@@ -34,7 +53,13 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-1/2 top-1/2 z-[51] grid w-[calc(100%-1.5rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border bg-background p-4 sm:p-6 text-foreground shadow-xl',
+        'fixed z-[51] grid w-[calc(100%-1.5rem)] max-w-lg gap-4 rounded-lg border border-border bg-background p-4 sm:p-6 text-foreground shadow-xl',
+        // Mobile: top-anchored (not vertical-centered) — iOS Safari + keyboard break -translate-y-1/2 scroll
+        'left-1/2 top-[max(0.75rem,env(safe-area-inset-top))] -translate-x-1/2 translate-y-0',
+        'max-h-[min(92dvh,calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))]',
+        'overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]',
+        // Desktop: centered modal
+        'sm:top-1/2 sm:-translate-y-1/2',
         className
       )}
       {...props}

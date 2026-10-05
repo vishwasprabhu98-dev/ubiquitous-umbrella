@@ -40,11 +40,12 @@ import { ProductSelect } from '@/components/ui/product-select'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, mobileFormDialogClassName, mobileFormDialogBodyClassName, mobileFormDialogFooterClassName } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { sharePdfBlob, shareElementAsImage } from '@/lib/sharePdf'
 import { createOrderPdfBlob } from '@/lib/orderPdf'
+import { useIsMobile, useKeyboardInset } from '@/hooks/useKeyboardInset'
 import OrderView from './OrderView'
 import type { Order, OrderStatus, PaymentMode, PaymentStatus, TimeSlot } from '@/types'
 
@@ -196,6 +197,8 @@ export default function OrdersPage() {
   const [sharingPdf, setSharingPdf] = useState(false)
   const [customerSearch, setCustomerSearch] = useState('')
   const [advanceOpen, setAdvanceOpen] = useState(false)
+  const isMobile = useIsMobile()
+  const formKeyboardInset = useKeyboardInset((createOpen || !!editOrder) && isMobile)
 
   // Filter state — default: last 7 days + next 7 days
   const [showFilters, setShowFilters] = useState(false)
@@ -1046,16 +1049,31 @@ export default function OrdersPage() {
       {/* ── Create / Edit Order Dialog ── */}
       <Dialog open={createOpen || !!editOrder} onOpenChange={(open) => { if (!open) closeCreate() }}>
         <DialogContent
-          className="max-w-3xl max-h-[95vh] overflow-y-auto"
+          className={cn(mobileFormDialogClassName, 'max-w-3xl')}
+          style={
+            isMobile
+              ? {
+                  bottom: formKeyboardInset,
+                  maxHeight: `min(94dvh, calc(100dvh - ${formKeyboardInset}px))`,
+                  height: `min(94dvh, calc(100dvh - ${formKeyboardInset}px))`,
+                }
+              : undefined
+          }
           onInteractOutside={(e) => e.preventDefault()}
+          onOpenAutoFocus={(e) => {
+            if (isMobile) e.preventDefault()
+          }}
         >
-          <DialogHeader>
-            <DialogTitle>{editOrder ? `Edit Order — ${editOrder.orderNumber}` : 'Create New Order'}</DialogTitle>
-          </DialogHeader>
+          <div className="shrink-0 border-b border-border px-4 pb-3 pt-4 pr-12 sm:px-6 sm:pt-6">
+            <DialogHeader>
+              <DialogTitle>{editOrder ? `Edit Order — ${editOrder.orderNumber}` : 'Create New Order'}</DialogTitle>
+            </DialogHeader>
+          </div>
           <form
             onSubmit={handleSubmit(onSubmitOrder)}
-            className="space-y-5"
+            className="flex min-h-0 flex-1 flex-col"
           >
+            <div className={cn(mobileFormDialogBodyClassName, 'space-y-5')}>
 
             {/* Customer section */}
             <Tabs
@@ -1412,7 +1430,9 @@ export default function OrdersPage() {
                 </p>
               </div>
             </div>
+            </div>
 
+            <div className={mobileFormDialogFooterClassName}>
             <DialogFooter className="sm:flex-col sm:items-stretch">
               <Button
                 type="submit"
@@ -1431,6 +1451,7 @@ export default function OrdersPage() {
                 Cancel
               </button>
             </DialogFooter>
+            </div>
           </form>
         </DialogContent>
       </Dialog>

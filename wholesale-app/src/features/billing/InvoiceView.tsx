@@ -2,14 +2,15 @@ import { useQuery } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { getBillDateString, istDayStart } from '@/lib/istDate'
+import { getInvoiceBalanceBreakdown } from '@/lib/invoiceBalance'
 import { settingsRepository } from '@/firebase/repositories/settingsRepository'
 import type { Bill } from '@/types'
 
 interface InvoiceViewProps {
   bill: Bill
   /**
-   * When set (registered customer), show this ledger outstanding as Balance Due
-   * instead of the bill’s remainingAmount.
+   * When set (registered customer), show ledger outstanding as Balance Due
+   * and derive Previous Balance from it.
    */
   ledgerOutstanding?: number | null
 }
@@ -49,14 +50,14 @@ export default function InvoiceView({ bill, ledgerOutstanding = null }: InvoiceV
   const billDay = getBillDateString(bill)
   const invoiceDateLabel = billDay ? formatDate(istDayStart(billDay)) : '—'
 
-  const useLedgerDue = ledgerOutstanding != null
-  const dueAmount = useLedgerDue
-    ? ledgerOutstanding
-    : bill.movedToLedger
-      ? 0
-      : bill.remainingAmount
-  const showBalanceDue = dueAmount > 0.001
-  const showCredit = useLedgerDue && dueAmount < -0.001
+  const {
+    previousBalance,
+    dueAmount,
+    showPreviousBalance,
+    showAmountPaid,
+    showBalanceDue,
+    showCredit,
+  } = getInvoiceBalanceBreakdown(bill, ledgerOutstanding)
 
   return (
     <div className="print-document p-6" id="invoice-print">
@@ -93,7 +94,9 @@ export default function InvoiceView({ bill, ledgerOutstanding = null }: InvoiceV
       <div className="mb-4">
         <h3 className="text-xs pd-semibold pd-muted uppercase tracking-wide mb-1">Bill To</h3>
         <p className="pd-semibold">{bill.customerInfo.name}</p>
-        <p className="pd-muted text-xs">{bill.customerInfo.phone}</p>
+        {bill.customerInfo.phone && (
+          <p className="pd-muted text-xs">{bill.customerInfo.phone}</p>
+        )}
         {bill.customerInfo.gstNumber && (
           <p className="pd-muted text-xs">GST: {bill.customerInfo.gstNumber}</p>
         )}
@@ -174,10 +177,18 @@ export default function InvoiceView({ bill, ledgerOutstanding = null }: InvoiceV
             <span>Grand Total</span>
             <span className="pd-primary">{formatCurrency(bill.grandTotal)}</span>
           </div>
-          <div className="flex justify-between pd-success">
-            <span>Amount Paid</span>
-            <span>{formatCurrency(bill.amountPaid)}</span>
-          </div>
+          {showPreviousBalance && (
+            <div className={`flex justify-between ${previousBalance < 0 ? 'pd-success' : 'pd-muted'}`}>
+              <span>{previousBalance < 0 ? 'Previous Credit' : 'Previous Balance'}</span>
+              <span>{formatCurrency(Math.abs(previousBalance))}</span>
+            </div>
+          )}
+          {showAmountPaid && (
+            <div className="flex justify-between pd-success">
+              <span>Amount Paid</span>
+              <span>{formatCurrency(bill.amountPaid)}</span>
+            </div>
+          )}
           {showBalanceDue && (
             <div className="flex justify-between pd-semibold pd-danger border-t pt-1">
               <span>Balance Due</span>

@@ -44,12 +44,16 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  mobileFormDialogClassName,
+  mobileFormDialogBodyClassName,
+  mobileFormDialogFooterClassName,
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { sharePdfBlob, shareElementAsImage } from '@/lib/sharePdf'
 import { createBillPdfBlob } from '@/lib/billPdf'
 import { printBillToBlePrinter } from '@/lib/thermalPrinter'
+import { useIsMobile, useKeyboardInset } from '@/hooks/useKeyboardInset'
 import type { Bill, BillStatus, PaymentMode, PaymentStatus } from '@/types'
 import InvoiceView from './InvoiceView'
 
@@ -262,6 +266,8 @@ export default function BillingPage() {
   const [editingBill, setEditingBill] = useState<Bill | null>(null)
   const [customerSearch, setCustomerSearch] = useState('')
   const [expandSummary, setExpandSummary] = useState(true)
+  const isMobile = useIsMobile()
+  const formKeyboardInset = useKeyboardInset(formOpen && isMobile)
 
   // Filter state — default: last 7 days
   const [showFilters, setShowFilters] = useState(false)
@@ -473,14 +479,12 @@ export default function BillingPage() {
       return
     }
 
-    if (phoneDigits.length < 10) {
+    if (phoneDigits.length > 0 && phoneDigits.length < 10) {
       setError('customerPhone', {
         type: 'manual',
-        message: data.customerType === 'existing'
-          ? 'Selected customer must have a valid phone number'
-          : 'Phone number is required (min 10 digits)',
+        message: 'Enter a valid phone number (min 10 digits)',
       })
-      toast.error('Phone number is required')
+      toast.error('Enter a valid phone number')
       return
     }
 
@@ -1122,21 +1126,37 @@ export default function BillingPage() {
       {/* ── Create / Edit Bill Dialog ── */}
       <Dialog open={formOpen} onOpenChange={(open) => { if (!open) closeForm() }}>
         <DialogContent
-          className="max-w-4xl max-h-[95vh] overflow-y-auto"
+          className={cn(mobileFormDialogClassName, 'max-w-4xl')}
+          style={
+            isMobile
+              ? {
+                  bottom: formKeyboardInset,
+                  maxHeight: `min(94dvh, calc(100dvh - ${formKeyboardInset}px))`,
+                  height: `min(94dvh, calc(100dvh - ${formKeyboardInset}px))`,
+                }
+              : undefined
+          }
           onInteractOutside={(e) => e.preventDefault()}
+          onOpenAutoFocus={(e) => {
+            // Prevent iOS jumping / scroll lock when autofocusing the first field
+            if (isMobile) e.preventDefault()
+          }}
         >
-          <DialogHeader>
-            <DialogTitle>
-              {formMode === 'edit'
-                ? `Edit Bill — ${editingBill?.billNumber}`
-                : 'Create New Bill'}
-            </DialogTitle>
-          </DialogHeader>
+          <div className="shrink-0 border-b border-border px-4 pb-3 pt-4 pr-12 sm:px-6 sm:pt-6">
+            <DialogHeader>
+              <DialogTitle>
+                {formMode === 'edit'
+                  ? `Edit Bill — ${editingBill?.billNumber}`
+                  : 'Create New Bill'}
+              </DialogTitle>
+            </DialogHeader>
+          </div>
 
           <form
             onSubmit={handleSubmit(onSubmitBill)}
-            className="space-y-6"
+            className="flex min-h-0 flex-1 flex-col"
           >
+            <div className={mobileFormDialogBodyClassName}>
             {/* Customer */}
             {formMode === 'create' ? (
               <Tabs
@@ -1234,15 +1254,17 @@ export default function BillingPage() {
                       {errors.customerName && <p className="text-xs text-red-500">{errors.customerName.message}</p>}
                     </div>
                     <div className="space-y-1.5">
-                      <Label>Phone *</Label>
+                      <Label>Phone</Label>
                       <Input
                         {...register('customerPhone', {
-                          required: 'Phone number is required',
-                          validate: (value) =>
-                            value.replace(/\D/g, '').length >= 10 || 'Enter a valid phone number (min 10 digits)',
+                          validate: (value) => {
+                            const digits = (value ?? '').replace(/\D/g, '')
+                            if (!digits) return true
+                            return digits.length >= 10 || 'Enter a valid phone number (min 10 digits)'
+                          },
                           onChange: () => clearErrors('customerPhone'),
                         })}
-                        placeholder="9876543210"
+                        placeholder="Optional"
                       />
                       {errors.customerPhone && <p className="text-xs text-red-500">{errors.customerPhone.message}</p>}
                     </div>
@@ -1537,7 +1559,9 @@ export default function BillingPage() {
                 className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
               />
             </div>
+            </div>
 
+            <div className={mobileFormDialogFooterClassName}>
             <DialogFooter className="sm:flex-col sm:items-stretch">
               <Button
                 type="submit"
@@ -1556,6 +1580,7 @@ export default function BillingPage() {
                 Cancel
               </button>
             </DialogFooter>
+            </div>
           </form>
         </DialogContent>
       </Dialog>
@@ -1690,7 +1715,10 @@ export default function BillingPage() {
                 onClick={async () => {
                   setSharingPdf(true)
                   try {
-                    const blob = await createBillPdfBlob(viewBill, shopProfile)
+                    const ledgerOutstanding = viewBill.customerId
+                      ? (viewLedgerBalance?.outstanding ?? null)
+                      : null
+                    const blob = await createBillPdfBlob(viewBill, shopProfile, ledgerOutstanding)
                     await sharePdfBlob({
                       blob,
                       filename: `invoice-${viewBill.billNumber}.pdf`,
@@ -1744,8 +1772,8 @@ export default function BillingPage() {
                           ? 0
                           : viewBill.remainingAmount
                     const shareText = [
-                      `Bill Amount: ${formatCurrency(viewBill.grandTotal)}`,
-                      `Total Balance: ${formatCurrency(balanceDue)}`,
+                      `Bill Amount: *${formatCurrency(viewBill.grandTotal)}*`,
+                      `Total Balance: *${formatCurrency(balanceDue)}*`,
                     ].join('\n\n')
                     await shareElementAsImage({
                       elementId: 'invoice-print',
@@ -1793,7 +1821,11 @@ export default function BillingPage() {
                 onClick={async () => {
                   setPrintingReceipt(true)
                   try {
-                    await printBillToBlePrinter(viewBill, shopProfile)
+                    await printBillToBlePrinter(
+                      viewBill,
+                      shopProfile,
+                      viewBill.customerId ? (viewLedgerBalance?.outstanding ?? null) : null
+                    )
                     logActivity({
                       type: 'bill.printed',
                       description: `Printed thermal receipt for bill ${viewBill.billNumber}`,

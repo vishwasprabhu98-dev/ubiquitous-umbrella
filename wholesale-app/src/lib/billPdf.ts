@@ -1,6 +1,7 @@
 import type { Content, TDocumentDefinitions, TableCell } from 'pdfmake/interfaces'
 import { formatDate } from '@/lib/utils'
 import { getBillDateString, istDayStart } from '@/lib/istDate'
+import { getInvoiceBalanceBreakdown } from '@/lib/invoiceBalance'
 import {
   PDF_TABLE_LAYOUT,
   basePdfDefinition,
@@ -73,7 +74,8 @@ function customerAddress(bill: Bill): string {
 
 export function buildBillPdfDefinition(
   bill: Bill,
-  shopProfile: ShopProfile | null | undefined
+  shopProfile: ShopProfile | null | undefined,
+  ledgerOutstanding?: number | null
 ): TDocumentDefinitions {
   const invoiceDate = billDate(bill)
   const custAddress = customerAddress(bill)
@@ -87,6 +89,14 @@ export function buildBillPdfDefinition(
     (sum, item) => sum + item.quantity * item.unitRate,
     0
   )
+  const {
+    previousBalance,
+    dueAmount,
+    showPreviousBalance,
+    showAmountPaid,
+    showBalanceDue,
+    showCredit,
+  } = getInvoiceBalanceBreakdown(bill, ledgerOutstanding)
 
   const totalsRows: Content[] = []
 
@@ -148,28 +158,53 @@ export function buildBillPdfDefinition(
     })
   }
 
-  totalsRows.push(
-    {
+  totalsRows.push({
+    columns: [
+      { text: 'Total', width: '*', alignment: 'right' as const, bold: true },
+      { text: pdfFmt(bill.grandTotal), width: 80, alignment: 'right' as const, bold: true },
+    ],
+    margin: [0, 4, 0, 4] as [number, number, number, number],
+  })
+
+  if (showPreviousBalance) {
+    totalsRows.push({
       columns: [
-        { text: 'Total', width: '*', alignment: 'right' as const, bold: true },
-        { text: pdfFmt(bill.grandTotal), width: 80, alignment: 'right' as const, bold: true },
+        {
+          text: previousBalance < 0 ? 'Previous Credit' : 'Previous Balance',
+          width: '*',
+          alignment: 'right' as const,
+        },
+        { text: pdfFmt(Math.abs(previousBalance)), width: 80, alignment: 'right' as const },
       ],
-      margin: [0, 4, 0, 4] as [number, number, number, number],
-    },
-    {
+      margin: [0, 0, 0, 4] as [number, number, number, number],
+    })
+  }
+
+  if (showAmountPaid) {
+    totalsRows.push({
       columns: [
         { text: `Paid (${invoiceDate})`, width: '*', alignment: 'right' as const },
         { text: pdfFmt(bill.amountPaid), width: 80, alignment: 'right' as const },
       ],
       margin: [0, 0, 0, 4] as [number, number, number, number],
-    }
-  )
+    })
+  }
 
-  if (bill.remainingAmount > 0 && !bill.movedToLedger) {
+  if (showBalanceDue) {
     totalsRows.push({
       columns: [
         { text: 'Balance Due', width: '*', alignment: 'right' as const, bold: true },
-        { text: pdfFmt(bill.remainingAmount), width: 80, alignment: 'right' as const, bold: true },
+        { text: pdfFmt(dueAmount), width: 80, alignment: 'right' as const, bold: true },
+      ],
+      margin: [0, 4, 0, 0] as [number, number, number, number],
+    })
+  }
+
+  if (showCredit) {
+    totalsRows.push({
+      columns: [
+        { text: 'Credit Balance', width: '*', alignment: 'right' as const, bold: true },
+        { text: pdfFmt(Math.abs(dueAmount)), width: 80, alignment: 'right' as const, bold: true },
       ],
       margin: [0, 4, 0, 0] as [number, number, number, number],
     })
@@ -245,7 +280,8 @@ export function buildBillPdfDefinition(
 
 export async function createBillPdfBlob(
   bill: Bill,
-  shopProfile: ShopProfile | null | undefined
+  shopProfile: ShopProfile | null | undefined,
+  ledgerOutstanding?: number | null
 ): Promise<Blob> {
-  return createPdfBlob(buildBillPdfDefinition(bill, shopProfile))
+  return createPdfBlob(buildBillPdfDefinition(bill, shopProfile, ledgerOutstanding))
 }
