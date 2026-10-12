@@ -133,13 +133,16 @@ export const transactionRepository = {
     }
   },
 
-  async create(data: Omit<Transaction, 'transactionId' | 'createdAt'>): Promise<Transaction> {
+  async create(
+    data: Omit<Transaction, 'transactionId' | 'createdAt'>,
+    options?: { syncBalance?: boolean }
+  ): Promise<Transaction> {
     const clean = sanitizeFirestoreData(data as Record<string, unknown>)
     const docRef = await addDoc(transactionsRef(), {
       ...clean,
       createdAt: serverTimestamp(),
     })
-    if (data.customerId) {
+    if (data.customerId && options?.syncBalance !== false) {
       await customerBalanceRepository.refresh(data.customerId)
     }
     return { ...data, transactionId: docRef.id, createdAt: serverTimestamp() } as Transaction

@@ -28,6 +28,11 @@ function timestampFromBillingDate(billingDate?: string): Timestamp {
 
 const billsRef = () => collection(db, COLLECTIONS.BILLS)
 
+export type BalanceSyncOption = {
+  /** When false, skip ledger balance rebuild (caller will sync once after batched writes). Default true. */
+  syncBalance?: boolean
+}
+
 async function syncBalance(customerId?: string | null) {
   if (!customerId) return
   await customerBalanceRepository.refresh(customerId)
@@ -159,7 +164,10 @@ export const billRepository = {
     return { bills, lastDoc }
   },
 
-  async create(data: Omit<Bill, 'billId' | 'createdAt'>): Promise<Bill> {
+  async create(
+    data: Omit<Bill, 'billId' | 'createdAt'>,
+    options?: BalanceSyncOption
+  ): Promise<Bill> {
     const billingDate = data.billingDate || todayIst()
     const createdAt = timestampFromBillingDate(billingDate)
     const clean = sanitizeFirestoreData({
@@ -172,11 +180,17 @@ export const billRepository = {
       billingDate,
       createdAt,
     })
-    await syncBalance(data.customerId)
+    if (options?.syncBalance !== false) {
+      await syncBalance(data.customerId)
+    }
     return { ...data, billingDate, billId: docRef.id, createdAt }
   },
 
-  async update(billId: string, data: Partial<Bill>): Promise<void> {
+  async update(
+    billId: string,
+    data: Partial<Bill>,
+    options?: BalanceSyncOption
+  ): Promise<void> {
     const existing = await this.getById(billId)
     const patch: Partial<Bill> = { ...data }
     if (data.billingDate) {
@@ -185,6 +199,7 @@ export const billRepository = {
     }
     const clean = sanitizeFirestoreData(patch as Record<string, unknown>)
     await updateDoc(doc(db, COLLECTIONS.BILLS, billId), clean)
+    if (options?.syncBalance === false) return
     const customerId = data.customerId ?? existing?.customerId
     await syncBalance(customerId)
     if (existing?.customerId && data.customerId && data.customerId !== existing.customerId) {

@@ -611,23 +611,28 @@ export default function OrdersPage() {
       const amountPaid = markPaid ? subtotal : orderAdvance
       const remainingAmount = Math.max(0, subtotal - amountPaid)
       const paymentStatus = paymentStatusFromAmounts(subtotal, amountPaid)
-      const createdBill = await billRepository.create({
-        billNumber,
-        ...(order.customerId ? { customerId: order.customerId } : {}),
-        customerInfo: order.customerInfo,
-        items: order.items.map((item) => ({ ...item, itemDiscount: 0, gstPercentage: 0 })),
-        subtotal,
-        discount: 0,
-        gstAmount: 0,
-        grandTotal: subtotal,
-        isGstBill: false,
-        status: billStatusFromPayment(paymentStatus),
-        amountPaid,
-        remainingAmount,
-        paymentStatus,
-        billingDate: todayIst(),
-      })
-      if (order.customerId && amountPaid > 0.01) {
+      const willCreatePaymentTx = Boolean(order.customerId && amountPaid > 0.01)
+      const createdBill = await billRepository.create(
+        {
+          billNumber,
+          ...(order.customerId ? { customerId: order.customerId } : {}),
+          customerInfo: order.customerInfo,
+          items: order.items.map((item) => ({ ...item, itemDiscount: 0, gstPercentage: 0 })),
+          subtotal,
+          discount: 0,
+          gstAmount: 0,
+          grandTotal: subtotal,
+          isGstBill: false,
+          status: billStatusFromPayment(paymentStatus),
+          amountPaid,
+          remainingAmount,
+          paymentStatus,
+          billingDate: todayIst(),
+        },
+        // Payment tx below also refreshes balance — avoid rebuilding twice.
+        { syncBalance: !willCreatePaymentTx }
+      )
+      if (willCreatePaymentTx && order.customerId) {
         const autoRemarks = markPaid
           ? `Paid while converting order ${order.orderNumber} to bill`
           : `Order advance adjusted from ${order.orderNumber}`
@@ -1293,18 +1298,7 @@ export default function OrdersPage() {
 
             {/* Items section */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">Order Items</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => append({ productId: '', productName: '', quantity: 1, unitRate: 0, total: 0 })}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Item
-                </Button>
-              </div>
+              <Label className="text-base font-semibold">Order Items</Label>
 
               {/* Mobile: card per item */}
               <div className="sm:hidden space-y-3">
@@ -1359,6 +1353,15 @@ export default function OrdersPage() {
                     </div>
                   )
                 })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => append({ productId: '', productName: '', quantity: 1, unitRate: 0, total: 0 })}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Item
+                </Button>
               </div>
 
               {/* Desktop: table */}
@@ -1421,6 +1424,17 @@ export default function OrdersPage() {
                     })}
                   </tbody>
                 </table>
+                <div className="pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => append({ productId: '', productName: '', quantity: 1, unitRate: 0, total: 0 })}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add Item
+                  </Button>
+                </div>
               </div>
 
               <div className="flex justify-end pt-1 border-t border-gray-100 dark:border-gray-800">

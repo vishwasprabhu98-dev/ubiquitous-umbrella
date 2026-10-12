@@ -753,12 +753,18 @@ export default function BillingPage() {
       const newRemaining = Math.max(0, paymentBill.grandTotal - newAmountPaid)
       const newPaymentStatus: PaymentStatus = newRemaining <= 0 ? 'PAID' : 'PARTIAL'
 
-      await billRepository.update(paymentBill.billId, {
-        amountPaid: newAmountPaid,
-        remainingAmount: newRemaining,
-        paymentStatus: newPaymentStatus,
-        status: statusFromPayment(newPaymentStatus),
-      })
+      // Skip balance sync on the bill write when a payment transaction follows —
+      // otherwise refresh() runs twice (full customer history each time).
+      await billRepository.update(
+        paymentBill.billId,
+        {
+          amountPaid: newAmountPaid,
+          remainingAmount: newRemaining,
+          paymentStatus: newPaymentStatus,
+          status: statusFromPayment(newPaymentStatus),
+        },
+        { syncBalance: !paymentBill.customerId }
+      )
 
       if (paymentBill.customerId) {
         await transactionRepository.create({
@@ -1335,20 +1341,7 @@ export default function BillingPage() {
 
             {/* Items */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">Bill Items</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    append({ productId: '', productName: '', quantity: 1, unitRate: 0, itemDiscount: 0, gstPercentage: 0, total: 0 })
-                  }
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Item
-                </Button>
-              </div>
+              <Label className="text-base font-semibold">Bill Items</Label>
 
               {/* Mobile: card per item */}
               <div className="sm:hidden space-y-3">
@@ -1410,6 +1403,17 @@ export default function BillingPage() {
                     </div>
                   )
                 })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() =>
+                    append({ productId: '', productName: '', quantity: 1, unitRate: 0, itemDiscount: 0, gstPercentage: 0, total: 0 })
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Item
+                </Button>
               </div>
 
               {/* Desktop: table */}
@@ -1481,6 +1485,19 @@ export default function BillingPage() {
                     })}
                   </tbody>
                 </table>
+                <div className="pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      append({ productId: '', productName: '', quantity: 1, unitRate: 0, itemDiscount: 0, gstPercentage: 0, total: 0 })
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add Item
+                  </Button>
+                </div>
               </div>
             </div>
 
