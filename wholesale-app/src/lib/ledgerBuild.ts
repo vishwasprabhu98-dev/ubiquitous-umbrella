@@ -397,11 +397,31 @@ export function filterLedgerRowsForPeriod(
   return withBalance.reverse()
 }
 
+/** Customer ids that have a bill, payment, or purchase inside the loaded month. */
+export function customerIdsWithMonthActivity(
+  bills: Bill[],
+  transactions: Transaction[],
+  purchases: PurchaseInvoice[] = []
+): Set<string> {
+  const ids = new Set<string>()
+  for (const bill of bills) {
+    if (bill.customerId) ids.add(bill.customerId)
+  }
+  for (const tx of transactions) {
+    if (tx.customerId && (tx.amount ?? 0) > 0) ids.add(tx.customerId)
+  }
+  for (const purchase of purchases) {
+    if (purchase.status === 'SAVED' && purchase.customerId) ids.add(purchase.customerId)
+  }
+  return ids
+}
+
 /** List entries for registered customers from denormalized balances. */
 export function buildExistingLedgerFromBalances(
   customers: Customer[],
   balances: CustomerBalance[],
-  activityMonthKey?: string
+  activityMonthKey?: string,
+  activeInMonth?: ReadonlySet<string>
 ): CustomerLedgerEntry[] {
   const balanceById = new Map(balances.map((b) => [b.customerId, b]))
   const customerById = new Map(customers.map((c) => [c.customerId, c]))
@@ -414,10 +434,14 @@ export function buildExistingLedgerFromBalances(
 
     const lastActivity = toDate(balance.lastActivityAt)
     const lastMonth = lastActivity ? toIstMonthKey(lastActivity) : undefined
+    // Outstanding customers always stay visible. Cleared customers stay visible
+    // in every month they actually transacted, not only the month of the last payment.
     const inRange =
       !activityMonthKey
         ? true
-        : balance.outstanding !== 0 || lastMonth === activityMonthKey
+        : balance.outstanding !== 0 ||
+          lastMonth === activityMonthKey ||
+          (activeInMonth?.has(balance.customerId) ?? false)
 
     if (!inRange) continue
 

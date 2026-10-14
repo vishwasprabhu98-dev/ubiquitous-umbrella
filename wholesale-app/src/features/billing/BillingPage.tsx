@@ -1,10 +1,11 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 import {
   Plus,
   Trash2,
+  AlertTriangle,
   Loader2,
   Receipt,
   Search,
@@ -15,6 +16,7 @@ import {
   Edit2,
   CreditCard,
   Filter,
+  RefreshCw,
   BookOpen,
   Undo2,
   Share2,
@@ -94,6 +96,13 @@ interface BillFormData {
   isGstBill: boolean
   comment?: string
   billingDate: string
+}
+
+function billsCreatedToday(bills: Bill[], customerId: string): Bill[] {
+  const today = todayIst()
+  return bills.filter(
+    (bill) => bill.customerId === customerId && getBillDateString(bill) === today
+  )
 }
 
 function BillCard({
@@ -288,6 +297,12 @@ export default function BillingPage() {
   const [payRemarks, setPayRemarks] = useState('')
   const [payLoading, setPayLoading] = useState(false)
   const [moveToLedgerBill, setMoveToLedgerBill] = useState<Bill | null>(null)
+  const [sameDayPrompt, setSameDayPrompt] = useState<{
+    bills: Bill[]
+    pending?: BillFormData
+  } | null>(null)
+  const [checkingSameDay, setCheckingSameDay] = useState(false)
+  const acknowledgedSameDayIds = useRef<Set<string>>(new Set())
 
   const applyPreset = (preset: DatePreset) => {
     setDatePreset(preset)
@@ -307,7 +322,7 @@ export default function BillingPage() {
     return count
   }, [datePreset, filterPayStatus])
 
-  const { data: bills = [], isLoading } = useQuery({
+  const { data: bills = [], isLoading, isFetching: billsFetching, refetch: refetchBills } = useQuery({
     queryKey: ['bills'],
     queryFn: billRepository.getAll,
   })
@@ -340,6 +355,7 @@ export default function BillingPage() {
     reset,
     setError,
     clearErrors,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<BillFormData>({
     defaultValues: {
@@ -352,14 +368,73 @@ export default function BillingPage() {
     },
   })
 
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' })
+  const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' })
+
+  const blankBillItem = {
+    productId: '',
+    productName: '',
+    quantity: 1,
+    unitRate: 0,
+    itemDiscount: 0,
+    gstPercentage: 0,
+    total: 0,
+  }
+
+  const dropZeroQuantityItem = (index: number) => {
+    const items = getValues('items')
+    const item = items[index]
+    if (!item || (Number(item.quantity) || 0) > 0) return
+    if (items.length <= 1) {
+      replace([blankBillItem])
+      return
+    }
+    remove(index)
+  }
 
   const watchItems = watch('items')
   const watchDiscount = watch('discount') ?? 0
   const watchAmountPaid = watch('amountPaid') ?? 0
   const watchCustomerType = watch('customerType')
   const watchCustomerId = watch('customerId')
+  const watchCustomerName = watch('customerName')
+  const watchBillingDate = watch('billingDate')
   const watchIsGstBill = watch('isGstBill')
+
+  const sameDayCustomerId =
+    formOpen && formMode === 'create' && watchCustomerType === 'existing' && watchCustomerId
+      ? watchCustomerId
+      : ''
+
+  const { data: sameDayCustomerBills = [] } = useQuery({
+    queryKey: ['bills', 'same-day', sameDayCustomerId],
+    queryFn: () => billRepository.getByCustomer(sameDayCustomerId),
+    enabled: Boolean(sameDayCustomerId),
+    staleTime: 0,
+    refetchInterval: sameDayCustomerId ? 5_000 : false,
+  })
+
+  useEffect(() => {
+    acknowledgedSameDayIds.current.clear()
+    setSameDayPrompt(null)
+  }, [sameDayCustomerId])
+
+  useEffect(() => {
+    if (!sameDayCustomerId || watchBillingDate !== todayIst()) {
+      setSameDayPrompt((prev) => (prev?.pending ? prev : null))
+      return
+    }
+    const unseen = billsCreatedToday(sameDayCustomerBills, sameDayCustomerId).filter(
+      (bill) => !acknowledgedSameDayIds.current.has(bill.billId)
+    )
+    setSameDayPrompt((prev) => {
+      if (prev?.pending) return prev
+      if (unseen.length === 0) return null
+      const prevIds = prev?.bills.map((bill) => bill.billId).join() ?? ''
+      const nextIds = unseen.map((bill) => bill.billId).join()
+      if (prev && prevIds === nextIds) return prev
+      return { bills: unseen }
+    })
+  }, [sameDayCustomerBills, sameDayCustomerId, watchBillingDate])
 
   const { data: shopProfile } = useQuery({
     queryKey: ['shopProfile'],
@@ -464,6 +539,22 @@ export default function BillingPage() {
   const closeForm = () => {
     setFormOpen(false)
     setEditingBill(null)
+    setSameDayPrompt(null)
+  }
+
+  const continueSameDayBill = async () => {
+    if (!sameDayPrompt) return
+    for (const bill of sameDayPrompt.bills) {
+      acknowledgedSameDayIds.current.add(bill.billId)
+    }
+    const pending = sameDayPrompt.pending
+    setSameDayPrompt(null)
+    if (pending) await createMutation.mutateAsync(pending)
+  }
+
+  const discardSameDayBill = () => {
+    setSameDayPrompt(null)
+    closeForm()
   }
 
   const onSubmitBill = async (data: BillFormData) => {
@@ -491,7 +582,12 @@ export default function BillingPage() {
       return
     }
 
-    const items = data.items.filter((item) => (Number(item.quantity) || 0) > 0)
+    const items = data.items.filter(
+      (item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0
+    )
+    if (items.length !== data.items.length) {
+      replace(items.length > 0 ? items : [blankBillItem])
+    }
     if (items.length === 0) {
       toast.error('Add at least one item with quantity greater than 0')
       return
@@ -501,9 +597,34 @@ export default function BillingPage() {
 
     if (formMode === 'edit') {
       await updateMutation.mutateAsync(payload)
-    } else {
-      await createMutation.mutateAsync(payload)
+      return
     }
+
+    const billingDay = payload.billingDate || todayIst()
+    if (payload.customerId && billingDay === todayIst()) {
+      setCheckingSameDay(true)
+      try {
+        const fresh = await queryClient.fetchQuery({
+          queryKey: ['bills', 'same-day', payload.customerId],
+          queryFn: () => billRepository.getByCustomer(payload.customerId!),
+          staleTime: 0,
+        })
+        const unseen = billsCreatedToday(fresh, payload.customerId).filter(
+          (bill) => !acknowledgedSameDayIds.current.has(bill.billId)
+        )
+        if (unseen.length > 0) {
+          setSameDayPrompt({ bills: unseen, pending: payload })
+          return
+        }
+      } catch {
+        toast.error('Could not check today’s bills. Try again.')
+        return
+      } finally {
+        setCheckingSameDay(false)
+      }
+    }
+
+    await createMutation.mutateAsync(payload)
   }
 
   const openPaymentDialog = (bill: Bill) => {
@@ -517,7 +638,7 @@ export default function BillingPage() {
     mutationFn: async (data: BillFormData) => {
       const billNumber = await billRepository.generateBillNumber()
       const items = data.items
-        .filter((item) => (Number(item.quantity) || 0) > 0)
+        .filter((item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0)
         .map((item) => ({
           ...item,
           quantity: Number(item.quantity),
@@ -590,7 +711,7 @@ export default function BillingPage() {
     mutationFn: async (data: BillFormData) => {
       if (!editingBill) return
       const itemsAfter = data.items
-        .filter((item) => (Number(item.quantity) || 0) > 0)
+        .filter((item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0)
         .map((item) => ({
           ...item,
           quantity: Number(item.quantity),
@@ -909,6 +1030,19 @@ export default function BillingPage() {
                 {activeFilterCount}
               </span>
             )}
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 w-9 p-0"
+            title="Refresh bills"
+            aria-label="Refresh bills"
+            disabled={billsFetching}
+            onClick={() => void refetchBills()}
+          >
+            <RefreshCw className={cn('h-4 w-4', billsFetching && 'animate-spin')} />
           </Button>
         </div>
 
@@ -1378,7 +1512,15 @@ export default function BillingPage() {
                         <div className="space-y-1">
                           <Label className="text-xs text-gray-500">Qty</Label>
                           <Controller control={control} name={`items.${index}.quantity`} render={({ field }) => (
-                            <NumericInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} className="h-8 text-center text-xs" />
+                            <NumericInput
+                              value={field.value}
+                              onChange={field.onChange}
+                              onBlur={() => {
+                                field.onBlur()
+                                dropZeroQuantityItem(index)
+                              }}
+                              className="h-8 text-center text-xs"
+                            />
                           )} />
                         </div>
                         <div className="space-y-1">
@@ -1457,7 +1599,15 @@ export default function BillingPage() {
                           </td>
                           <td className="py-2 px-2">
                             <Controller control={control} name={`items.${index}.quantity`} render={({ field }) => (
-                              <NumericInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} className="w-16 h-8 text-center text-xs" />
+                              <NumericInput
+                                value={field.value}
+                                onChange={field.onChange}
+                                onBlur={() => {
+                                  field.onBlur()
+                                  dropZeroQuantityItem(index)
+                                }}
+                                className="w-16 h-8 text-center text-xs"
+                              />
                             )} />
                           </td>
                           <td className="py-2 px-2">
@@ -1618,9 +1768,14 @@ export default function BillingPage() {
             <DialogFooter className="sm:flex-col sm:items-stretch">
               <Button
                 type="submit"
-                disabled={isSubmitting || createMutation.isPending || updateMutation.isPending}
+                disabled={
+                  isSubmitting ||
+                  checkingSameDay ||
+                  createMutation.isPending ||
+                  updateMutation.isPending
+                }
               >
-                {(isSubmitting || createMutation.isPending || updateMutation.isPending) && (
+                {(isSubmitting || checkingSameDay || createMutation.isPending || updateMutation.isPending) && (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 )}
                 {formMode === 'edit' ? 'Save Changes' : 'Create Bill'}
@@ -1635,6 +1790,66 @@ export default function BillingPage() {
             </DialogFooter>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!sameDayPrompt} onOpenChange={() => {}}>
+        <DialogContent
+          className="z-[70] max-w-md [&>button]:hidden"
+          overlayClassName="z-[60]"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              Bill already created today
+            </DialogTitle>
+          </DialogHeader>
+          {sameDayPrompt && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                <strong className="text-gray-900 dark:text-white">
+                  {sameDayPrompt.bills[0]?.customerInfo?.name || watchCustomerName || 'This customer'}
+                </strong>{' '}
+                already has {sameDayPrompt.bills.length === 1 ? 'a bill' : `${sameDayPrompt.bills.length} bills`} today.
+                This can happen when another account bills the same customer.
+              </p>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30 divide-y divide-amber-200/80 dark:divide-amber-900/50">
+                {sameDayPrompt.bills.map((bill) => (
+                  <div key={bill.billId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <span className="font-mono text-xs font-semibold text-gray-800 dark:text-gray-100">
+                      {bill.billNumber}
+                    </span>
+                    <span className="font-medium text-gray-700 dark:text-gray-200">
+                      {formatCurrency(bill.grandTotal)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Continue anyway goes ahead with this bill. Discard closes it without saving.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={createMutation.isPending}
+              onClick={discardSameDayBill}
+            >
+              Discard
+            </Button>
+            <Button
+              type="button"
+              disabled={createMutation.isPending}
+              onClick={() => void continueSameDayBill()}
+            >
+              {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Continue anyway
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -108,6 +108,7 @@ export default function PurchasePage() {
     reset,
     setError,
     clearErrors,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<PurchaseFormData>({
     defaultValues: {
@@ -119,7 +120,20 @@ export default function PurchasePage() {
     },
   })
 
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' })
+  const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' })
+
+  const blankPurchaseItem = { productId: '', productName: '', quantity: 1, unitRate: 0, total: 0 }
+
+  const dropZeroQuantityItem = (index: number) => {
+    const items = getValues('items')
+    const item = items[index]
+    if (!item || (Number(item.quantity) || 0) > 0) return
+    if (items.length <= 1) {
+      replace([blankPurchaseItem])
+      return
+    }
+    remove(index)
+  }
   const watchItems = watch('items')
   const watchVendorType = watch('vendorType')
   const watchCustomerId = watch('customerId')
@@ -178,7 +192,7 @@ export default function PurchasePage() {
     const customer = isCustomer ? customers.find((c) => c.customerId === data.customerId) : null
     const existingPaid = editingPurchase?.amountPaid ?? 0
     const items = data.items
-      .filter((item) => (Number(item.quantity) || 0) > 0)
+      .filter((item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0)
       .map((item) => ({
         ...item,
         quantity: Number(item.quantity),
@@ -217,7 +231,13 @@ export default function PurchasePage() {
   const saveMutation = useMutation({
     mutationFn: async ({ data, asDraft }: { data: PurchaseFormData; asDraft: boolean }) => {
       if (!validateVendor(data)) throw new Error('validation')
-      if (!data.items.some((item) => (Number(item.quantity) || 0) > 0)) {
+      const keptItems = data.items.filter(
+        (item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0
+      )
+      if (keptItems.length !== data.items.length) {
+        replace(keptItems.length > 0 ? keptItems : [blankPurchaseItem])
+      }
+      if (keptItems.length === 0) {
         toast.error('Add at least one item with quantity greater than 0')
         throw new Error('validation')
       }
@@ -749,7 +769,14 @@ export default function PurchasePage() {
                       control={control}
                       name={`items.${index}.quantity`}
                       render={({ field: f }) => (
-                        <NumericInput {...f} disabled={editingPurchase?.status === 'SAVED'} />
+                        <NumericInput
+                          {...f}
+                          disabled={editingPurchase?.status === 'SAVED'}
+                          onBlur={() => {
+                            f.onBlur()
+                            dropZeroQuantityItem(index)
+                          }}
+                        />
                       )}
                     />
                   </div>

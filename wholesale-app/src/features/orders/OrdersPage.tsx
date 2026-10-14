@@ -15,6 +15,7 @@ import {
   Truck,
   Package,
   Filter,
+  RefreshCw,
   Receipt,
   Share2,
   MessageCircle,
@@ -209,7 +210,7 @@ export default function OrdersPage() {
   const [filterDateMode, setFilterDateMode] = useState<'range' | 'single'>('range')
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ACCEPTED')
 
-  const { data: orders = [], isLoading } = useQuery({
+  const { data: orders = [], isLoading, isFetching: ordersFetching, refetch: refetchOrders } = useQuery({
     queryKey: ['orders'],
     queryFn: orderRepository.getAll,
   })
@@ -251,7 +252,20 @@ export default function OrdersPage() {
     },
   })
 
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' })
+  const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' })
+
+  const blankOrderItem = { productId: '', productName: '', quantity: 1, unitRate: 0, total: 0 }
+
+  const dropZeroQuantityItem = (index: number) => {
+    const items = getValues('items')
+    const item = items[index]
+    if (!item || (Number(item.quantity) || 0) > 0) return
+    if (items.length <= 1) {
+      replace([blankOrderItem])
+      return
+    }
+    remove(index)
+  }
   const watchItems = watch('items')
   const watchCustomerType = watch('customerType')
   const watchCustomerId = watch('customerId')
@@ -330,7 +344,12 @@ export default function OrdersPage() {
       return
     }
 
-    const items = data.items.filter((item) => (Number(item.quantity) || 0) > 0)
+    const items = data.items.filter(
+      (item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0
+    )
+    if (items.length !== data.items.length) {
+      replace(items.length > 0 ? items : [blankOrderItem])
+    }
     if (items.length === 0) {
       toast.error('Add at least one item with quantity greater than 0')
       return
@@ -449,7 +468,7 @@ export default function OrdersPage() {
           gstNumber: isExisting ? customer?.gstNumber : (data.customerGst ?? undefined),
         },
         items: data.items
-          .filter((item) => (Number(item.quantity) || 0) > 0)
+          .filter((item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0)
           .map((item) => ({
             ...item,
             quantity: Number(item.quantity),
@@ -458,7 +477,7 @@ export default function OrdersPage() {
             total: Number(item.quantity) * Number(item.unitRate),
           })),
         estimatedAmount: data.items
-          .filter((item) => (Number(item.quantity) || 0) > 0)
+          .filter((item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0)
           .reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitRate), 0),
         advanceAmount: Math.max(0, Number(data.advanceAmount) || 0),
         advanceMode: data.advanceMode,
@@ -530,7 +549,7 @@ export default function OrdersPage() {
       const customerName = isExisting ? (customer?.name ?? data.customerName) : data.customerName
       const existing = orders.find((o) => o.orderId === orderId)
       const itemsAfter = data.items
-        .filter((item) => (Number(item.quantity) || 0) > 0)
+        .filter((item) => Boolean(item.productId) && (Number(item.quantity) || 0) > 0)
         .map((item) => ({
           ...item,
           quantity: Number(item.quantity),
@@ -829,6 +848,19 @@ export default function OrdersPage() {
                 {activeFilterCount}
               </span>
             )}
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 w-9 p-0"
+            title="Refresh orders"
+            aria-label="Refresh orders"
+            disabled={ordersFetching}
+            onClick={() => void refetchOrders()}
+          >
+            <RefreshCw className={cn('h-4 w-4', ordersFetching && 'animate-spin')} />
           </Button>
         </div>
 
@@ -1334,7 +1366,15 @@ export default function OrdersPage() {
                         <div className="space-y-1">
                           <Label className="text-xs text-gray-500">Qty</Label>
                           <Controller control={control} name={`items.${index}.quantity`} render={({ field }) => (
-                            <NumericInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} className="h-8 text-center text-xs" />
+                            <NumericInput
+                              value={field.value}
+                              onChange={field.onChange}
+                              onBlur={() => {
+                                field.onBlur()
+                                dropZeroQuantityItem(index)
+                              }}
+                              className="h-8 text-center text-xs"
+                            />
                           )} />
                         </div>
                         <div className="space-y-1">
@@ -1403,7 +1443,15 @@ export default function OrdersPage() {
                           </td>
                           <td className="py-2 px-2">
                             <Controller control={control} name={`items.${index}.quantity`} render={({ field }) => (
-                              <NumericInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} className="w-16 h-8 text-center text-xs" />
+                              <NumericInput
+                                value={field.value}
+                                onChange={field.onChange}
+                                onBlur={() => {
+                                  field.onBlur()
+                                  dropZeroQuantityItem(index)
+                                }}
+                                className="w-16 h-8 text-center text-xs"
+                              />
                             )} />
                           </td>
                           <td className="py-2 px-2">

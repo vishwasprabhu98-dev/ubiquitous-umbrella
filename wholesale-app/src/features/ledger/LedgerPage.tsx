@@ -61,6 +61,7 @@ import {
   buildVendorLedger,
   matchesLedgerSearch,
   applyMonthActivityToExistingEntries,
+  customerIdsWithMonthActivity,
   filterLedgerRowsForPeriod,
   type CustomerLedgerEntry,
   type LedgerRow,
@@ -1016,7 +1017,12 @@ export default function LedgerPage() {
 
   const ledger = useMemo(() => {
     if (view === 'existing') {
-      const base = buildExistingLedgerFromBalances(customers, balances, monthKey)
+      const activeInMonth = customerIdsWithMonthActivity(
+        rangeBills,
+        monthTransactions,
+        monthCustomerPurchases
+      )
+      const base = buildExistingLedgerFromBalances(customers, balances, monthKey, activeInMonth)
       return applyMonthActivityToExistingEntries(
         base,
         rangeBills,
@@ -1461,8 +1467,9 @@ export default function LedgerPage() {
       )}
       {view === 'existing' && (
         <p className="text-xs text-gray-400 -mt-3">
-          Customers with outstanding dues always appear. Expanded ledger loads only this month’s rows;
-          earlier dues show as Brought Forward from monthly snapshots.
+          Customers with outstanding dues always appear. On All or Paid, a cleared customer stays
+          listed in every month they had bills or payments. Expanded ledger loads only this month’s
+          rows; earlier dues show as Brought Forward from monthly snapshots.
         </p>
       )}
 
