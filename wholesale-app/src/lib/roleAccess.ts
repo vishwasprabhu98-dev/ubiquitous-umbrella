@@ -18,13 +18,14 @@ import {
   RefreshCw,
   ScrollText,
   Link2,
+  ClipboardList,
 } from 'lucide-react'
 
 /** Routes each role may access (path prefixes). */
 export const ROLE_ROUTE_ACCESS: Record<UserRole, string[]> = {
   staff: ['/', '/billing', '/orders', '/ledger', '/more'],
   finance: ['/', '/billing', '/orders', '/ledger', '/purchases', '/balance-sheet', '/settings', '/more'],
-  admin: ['/', '/billing', '/orders', '/ledger', '/purchases', '/balance-sheet', '/settings', '/more'],
+  admin: ['/', '/billing', '/orders', '/ledger', '/purchases', '/balance-sheet', '/reports', '/settings', '/more'],
 }
 
 export function canAccessRoute(role: UserRole, pathname: string): boolean {
@@ -122,6 +123,18 @@ export const MORE_MODULE_GROUPS: {
     items: [
       { label: 'Purchase', to: '/purchases', icon: ShoppingBag, roles: ['finance', 'admin'] },
       { label: 'Balance Sheet', to: '/balance-sheet', icon: BarChart3, roles: ['finance', 'admin'] },
+    ],
+  },
+  {
+    title: 'Reports',
+    roles: ['staff', 'finance', 'admin'],
+    items: [
+      {
+        label: 'Item Wise Sale Report',
+        to: '/reports/item-wise-sales',
+        icon: ClipboardList,
+        roles: ['staff', 'finance', 'admin'],
+      },
     ],
   },
   {

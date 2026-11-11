@@ -17,6 +17,7 @@ import SettingsPage from '@/features/settings/SettingsPage'
 import LedgerPage from '@/features/ledger/LedgerPage'
 import PurchasePage from '@/features/purchases/PurchasePage'
 import MorePage from '@/features/more/MorePage'
+import ItemWiseSaleReportPage from '@/features/reports/ItemWiseSaleReportPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -70,6 +71,7 @@ export default function App() {
             <Route path="ledger/new" element={<LedgerPage />} />
             <Route path="purchases" element={<PurchasePage />} />
             <Route path="balance-sheet" element={<BalanceSheetPage />} />
+            <Route path="reports/item-wise-sales" element={<ItemWiseSaleReportPage />} />
             <Route
               path="more"
               element={<MorePage />}
