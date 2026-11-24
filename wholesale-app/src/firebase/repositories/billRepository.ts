@@ -191,15 +191,22 @@ export const billRepository = {
     data: Partial<Bill>,
     options?: BalanceSyncOption
   ): Promise<void> {
-    const existing = await this.getById(billId)
+    const skipBalanceSync = options?.syncBalance === false
     const patch: Partial<Bill> = { ...data }
     if (data.billingDate) {
       patch.billingDate = data.billingDate
       patch.createdAt = timestampFromBillingDate(data.billingDate)
     }
     const clean = sanitizeFirestoreData(patch as Record<string, unknown>)
+
+    // Fast path for flag-only updates (e.g. move/remove ledger): one write, no history rebuild.
+    if (skipBalanceSync) {
+      await updateDoc(doc(db, COLLECTIONS.BILLS, billId), clean)
+      return
+    }
+
+    const existing = await this.getById(billId)
     await updateDoc(doc(db, COLLECTIONS.BILLS, billId), clean)
-    if (options?.syncBalance === false) return
     const customerId = data.customerId ?? existing?.customerId
     await syncBalance(customerId)
     if (existing?.customerId && data.customerId && data.customerId !== existing.customerId) {

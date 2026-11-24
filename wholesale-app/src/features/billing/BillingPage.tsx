@@ -795,16 +795,25 @@ export default function BillingPage() {
 
   const moveToLedgerMutation = useMutation({
     mutationFn: (bill: Bill) =>
-      billRepository.update(bill.billId, {
-        movedToLedger: true,
-        paymentStatus: 'PAID',
-        status: 'DONE',
-        // Keep amountPaid; clear bill-level due — outstanding lives on the ledger.
-        remainingAmount: 0,
-      }).then(() => bill),
+      // Outstanding is unchanged by move-to-ledger (amountPaid stays the same) —
+      // skip full customer history rebuild so this stays a single fast write.
+      billRepository
+        .update(
+          bill.billId,
+          {
+            movedToLedger: true,
+            paymentStatus: 'PAID',
+            status: 'DONE',
+            // Keep amountPaid; clear bill-level due — outstanding lives on the ledger.
+            remainingAmount: 0,
+          },
+          { syncBalance: false }
+        )
+        .then(() => bill),
     onSuccess: (bill) => {
+      setMoveToLedgerBill(null)
+      toast.success('Bill moved to customer ledger')
       queryClient.invalidateQueries({ queryKey: ['bills'] })
-      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       logActivity({
@@ -817,8 +826,6 @@ export default function BillingPage() {
         customerName: bill.customerInfo?.name,
         meta: { remainingCleared: bill.remainingAmount },
       })
-      toast.success('Bill moved to customer ledger')
-      setMoveToLedgerBill(null)
     },
     onError: () => toast.error('Failed to move bill to ledger'),
   })
@@ -829,17 +836,21 @@ export default function BillingPage() {
       const paymentStatus: PaymentStatus =
         remaining <= 0 ? 'PAID' : bill.amountPaid > 0 ? 'PARTIAL' : 'UNPAID'
       return billRepository
-        .update(bill.billId, {
-          movedToLedger: false,
-          remainingAmount: remaining,
-          paymentStatus,
-          status: statusFromPayment(paymentStatus),
-        })
+        .update(
+          bill.billId,
+          {
+            movedToLedger: false,
+            remainingAmount: remaining,
+            paymentStatus,
+            status: statusFromPayment(paymentStatus),
+          },
+          { syncBalance: false }
+        )
         .then(() => ({ bill, remaining }))
     },
     onSuccess: ({ bill, remaining }) => {
+      toast.success('Bill removed from ledger')
       queryClient.invalidateQueries({ queryKey: ['bills'] })
-      queryClient.invalidateQueries({ queryKey: ['customerBalances'] })
       queryClient.invalidateQueries({ queryKey: ['ledger-detail'] })
       queryClient.invalidateQueries({ queryKey: ['bills', 'month'] })
       logActivity({
@@ -852,7 +863,6 @@ export default function BillingPage() {
         customerName: bill.customerInfo?.name,
         meta: { remainingAmount: remaining },
       })
-      toast.success('Bill removed from ledger')
     },
     onError: () => toast.error('Failed to remove bill from ledger'),
   })
